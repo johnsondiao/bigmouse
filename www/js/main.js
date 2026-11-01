@@ -61,18 +61,36 @@
   // ===================== 贴图 =====================
   function cv(w, h) { const c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
 
-  // 草地：深浅绿斑驳，避免纯色
+  // 草地：深浅绿斑块 + 草叶笔触，避免纯色
   function makeGrassTex() {
-    const s = 256;
+    const s = 512;
     const c = cv(s, s); const x = c.getContext('2d');
-    x.fillStyle = '#7cc24a'; x.fillRect(0, 0, s, s);
-    for (let i = 0; i < 3000; i++) {
-      const r = 100 + (Math.random() * 50 - 25), g = 150 + (Math.random() * 55 - 28), b = 60 + (Math.random() * 30 - 15);
-      x.fillStyle = 'rgba(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ',0.5)';
-      x.beginPath(); x.arc(Math.random() * s, Math.random() * s, Math.random() * 7 + 2, 0, 6.28); x.fill();
+    x.fillStyle = '#6fb83f'; x.fillRect(0, 0, s, s);
+    // 大块深浅草色斑驳
+    for (let i = 0; i < 60; i++) {
+      const lighter = Math.random() < 0.5;
+      const r = 180 + Math.random() * 60, g = 200 + Math.random() * 40, b = 80 + Math.random() * 30;
+      x.fillStyle = lighter ? 'rgba(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ',0.28)'
+                            : 'rgba(70,140,55,0.30)';
+      x.beginPath(); x.ellipse(Math.random() * s, Math.random() * s, Math.random() * 90 + 40, Math.random() * 70 + 30, Math.random() * 3.14, 0, 6.28); x.fill();
+    }
+    // 草叶短笔触（深浅交错）
+    for (let i = 0; i < 5200; i++) {
+      const px = Math.random() * s, py = Math.random() * s;
+      const dark = Math.random() < 0.5;
+      x.strokeStyle = dark ? 'rgba(54,118,42,0.55)' : 'rgba(150,210,90,0.55)';
+      x.lineWidth = 1.4;
+      x.beginPath(); x.moveTo(px, py); x.lineTo(px + (Math.random() * 2 - 1), py - (Math.random() * 5 + 3)); x.stroke();
+    }
+    // 零星小花与碎石
+    for (let i = 0; i < 120; i++) {
+      const px = Math.random() * s, py = Math.random() * s;
+      x.fillStyle = pick(['#f4f4ef', '#f0c04a', '#e87fae', '#c98be0']);
+      x.beginPath(); x.arc(px, py, Math.random() * 1.6 + 0.8, 0, 6.28); x.fill();
     }
     const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(18, 18);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 10);
+    t.anisotropy = 4;
     return t;
   }
   // 立面：单格一个窗户（可平铺），带砖缝/窗框/反光/亮灯
@@ -439,11 +457,32 @@
   // ===================== 其他物件 =====================
   function buildTree() {
     const g = new THREE.Group();
+    if (Math.random() < 0.45) {
+      // 松树：主干 + 3 层圆锥
+      const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x6b4326 }));
+      trunk.scale.set(0.4, 2.0, 0.4); trunk.position.y = 1.0; g.add(trunk);
+      const pineMat = new THREE.MeshLambertMaterial({ color: pick(['#2f7d43', '#357f4a', '#287040']) });
+      const tiers = [[2.6, 2.6, 3.4], [2.1, 2.3, 5.4], [1.5, 2.0, 7.2]];
+      for (const [r, h, y] of tiers) {
+        const cone = new THREE.Mesh(coneGeo, pineMat);
+        cone.scale.set(r, h, r); cone.position.y = y; g.add(cone);
+      }
+      return { group: g, radius: 2.4, mass: 12 };
+    }
+    // 阔叶树：主干 + 多个相交球团，云朵状
     const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x7a5230 }));
-    trunk.scale.set(0.42, 2.4, 0.42); trunk.position.y = 1.2; g.add(trunk);
-    const foli = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: pick(['#4e9b4a', '#5aa851', '#43893f', '#62b45a']) }));
-    foli.scale.set(2.3, 2.7, 2.3); foli.position.y = 4.4; g.add(foli);
-    return { group: g, radius: 1.8, mass: 12 };
+    trunk.scale.set(0.5, 2.8, 0.5); trunk.position.y = 1.4; g.add(trunk);
+    const base = pick(['#4e9b4a', '#5aa851', '#43893f', '#62b45a']);
+    const blobs = [
+      [0, 5.4, 0, 2.6], [1.8, 5.0, 0.6, 1.9], [-1.8, 5.0, -0.4, 1.9],
+      [0.4, 6.6, -0.6, 1.8], [-0.5, 4.6, 1.6, 1.7], [1.2, 6.2, 1.2, 1.4]
+    ];
+    for (const [bx, by, bz, br] of blobs) {
+      const shade = Math.random() < 0.4 ? '#3f8a3c' : base;
+      const b = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: shade }));
+      b.scale.set(br, br * 1.05, br); b.position.set(bx, by, bz); g.add(b);
+    }
+    return { group: g, radius: 2.4, mass: 12 };
   }
   function buildStreetLamp() {
     const g = new THREE.Group();
@@ -524,41 +563,62 @@
     return { group: g, radius: 0.5, mass: 3 };
   }
 
-  // 车辆：轿车 / 厢式货车 / 巴士
+  // 车辆：轿车 / 厢式货车 / 巴士，带车窗、轮毂、尾灯
   function buildCar(kind) {
     const g = new THREE.Group();
     const palette = ['#c94f43', '#3f6fb5', '#4f9a63', '#e0b040', '#c96ba8', '#e07b3a', '#e8e8e4', '#3c4147'];
     const color = pick(palette);
     const cmat = new THREE.MeshLambertMaterial({ color });
-    const dark = new THREE.MeshLambertMaterial({ color: 0x2b323a });
+    const glassMat = new THREE.MeshLambertMaterial({ color: 0x223445 });
     const wmat = new THREE.MeshLambertMaterial({ color: 0x17191c });
+    const hubMat = new THREE.MeshLambertMaterial({ color: 0xb8bcc0 });
+    const tailMat = new THREE.MeshBasicMaterial({ color: 0xb81f1f });
+    const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
     const wheels = [];
     const addWheels = (w, d) => {
       for (const p of [[-w, 0.52, d], [w, 0.52, d], [-w, 0.52, -d], [w, 0.52, -d]]) {
         const wh = new THREE.Mesh(cylGeo, wmat);
-        wh.scale.set(0.52, 0.32, 0.52); wh.rotation.z = Math.PI / 2;
-        wh.position.set(p[0], p[1], p[2]); g.add(wh); wheels.push(wh);
+        wh.scale.set(0.54, 0.34, 0.54); wh.rotation.z = Math.PI / 2;
+        wh.position.set(p[0], p[1], p[2]); g.add(wh);
+        const hub = new THREE.Mesh(cylGeo, hubMat);
+        hub.scale.set(0.26, 0.36, 0.26); hub.rotation.z = Math.PI / 2;
+        hub.position.set(p[0] + (p[0] > 0 ? 0.02 : -0.02), p[1], p[2]); g.add(hub);
+        wheels.push(wh);
       }
     };
     if (kind === 'van') {
-      const body = new THREE.Mesh(boxGeo, cmat); body.scale.set(2.4, 2.3, 5.6); body.position.y = 1.7; g.add(body);
-      const cab = new THREE.Mesh(boxGeo, dark); cab.scale.set(2.2, 1.0, 1.6); cab.position.set(0, 1.4, 2.2); g.add(cab);
+      const body = new THREE.Mesh(boxGeo, cmat); body.scale.set(2.4, 2.4, 5.6); body.position.y = 1.8; g.add(body);
+      const cab = new THREE.Mesh(boxGeo, cmat); cab.scale.set(2.3, 1.7, 1.6); cab.position.set(0, 1.45, 2.2); g.add(cab);
+      const wind = new THREE.Mesh(boxGeo, glassMat); wind.scale.set(2.0, 1.1, 0.12); wind.position.set(0, 1.7, 3.0); g.add(wind);
+      const side = new THREE.Mesh(boxGeo, glassMat); side.scale.set(0.12, 1.2, 4.0); side.position.set(1.22, 1.9, 0); g.add(side);
+      const side2 = side.clone(); side2.position.x = -1.22; g.add(side2);
       addWheels(1.15, 1.9);
+      for (const tx of [-1.0, 1.0]) { const tl = new THREE.Mesh(boxGeo, tailMat); tl.scale.set(0.3, 0.3, 0.12); tl.position.set(tx, 1.4, -2.84); g.add(tl); }
       return { group: g, radius: 3.0, mass: 12, parts: { wheels } };
     }
     if (kind === 'bus') {
       const body = new THREE.Mesh(boxGeo, cmat); body.scale.set(2.7, 3.2, 9.5); body.position.y = 2.2; g.add(body);
-      const glass = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x9ec3de }));
-      glass.scale.set(2.75, 1.1, 8.6); glass.position.y = 3.2; g.add(glass);
+      const glass = new THREE.Mesh(boxGeo, glassMat); glass.scale.set(2.78, 1.2, 8.6); glass.position.y = 3.3; g.add(glass);
       const skirt = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x8a9099 }));
       skirt.scale.set(2.8, 0.5, 9.6); skirt.position.y = 0.9; g.add(skirt);
+      const door = new THREE.Mesh(boxGeo, glassMat); door.scale.set(0.16, 2.6, 1.4); door.position.set(1.37, 2.0, 3.6); g.add(door);
       addWheels(1.3, 3.2);
+      for (const tx of [-1.0, 1.0]) { const tl = new THREE.Mesh(boxGeo, tailMat); tl.scale.set(0.34, 0.34, 0.12); tl.position.set(tx, 1.6, -4.78); g.add(tl); }
       return { group: g, radius: 5.0, mass: 26, parts: { wheels } };
     }
-    const body = new THREE.Mesh(boxGeo, cmat); body.scale.set(2.3, 1.1, 4.6); body.position.y = 0.95; g.add(body);
-    const cabin = new THREE.Mesh(boxGeo, dark); cabin.scale.set(1.95, 0.95, 2.3); cabin.position.set(0, 1.85, -0.25); g.add(cabin);
-    const hl = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color: 0xfff2b0 }));
-    hl.scale.set(1.7, 0.28, 0.2); hl.position.set(0, 1.0, 2.35); g.add(hl);
+    // 轿车：下半身 + 引擎盖 + 车厢 + 车窗
+    const body = new THREE.Mesh(boxGeo, cmat); body.scale.set(2.3, 1.0, 4.6); body.position.y = 0.95; g.add(body);
+    const hood = new THREE.Mesh(boxGeo, cmat); hood.scale.set(2.25, 0.7, 1.3); hood.position.set(0, 1.35, 1.75); g.add(hood);
+    const trunk = new THREE.Mesh(boxGeo, cmat); trunk.scale.set(2.2, 0.7, 1.1); trunk.position.set(0, 1.35, -1.85); g.add(trunk);
+    const cabin = new THREE.Mesh(boxGeo, cmat); cabin.scale.set(2.1, 1.0, 2.2); cabin.position.set(0, 1.7, -0.2); g.add(cabin);
+    const wind = new THREE.Mesh(boxGeo, glassMat); wind.scale.set(1.95, 0.85, 0.12); wind.position.set(0, 1.75, 0.95); g.add(wind);
+    const rear = new THREE.Mesh(boxGeo, glassMat); rear.scale.set(1.95, 0.8, 0.12); rear.position.set(0, 1.75, -1.35); g.add(rear);
+    const sw = new THREE.Mesh(boxGeo, glassMat); sw.scale.set(0.12, 0.8, 2.0); sw.position.set(1.07, 1.75, -0.2); g.add(sw);
+    const sw2 = sw.clone(); sw2.position.x = -1.07; g.add(sw2);
+    for (const tx of [-0.85, 0.85]) {
+      const hl = new THREE.Mesh(boxGeo, headMat); hl.scale.set(0.45, 0.28, 0.12); hl.position.set(tx, 1.0, 2.32); g.add(hl);
+      const tl = new THREE.Mesh(boxGeo, tailMat); tl.scale.set(0.45, 0.28, 0.12); tl.position.set(tx, 1.05, -2.32); g.add(tl);
+    }
     addWheels(1.05, 1.55);
     return { group: g, radius: 2.6, mass: 8, parts: { wheels } };
   }
