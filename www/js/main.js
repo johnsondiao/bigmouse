@@ -33,6 +33,7 @@
   const input = { vx: 0, vz: 0 };
 
   let boxGeo, circleGeo, torusGeo, cylOpenGeo, coneGeo, cylGeo, sphereGeo;
+  let holeGeo, holeWallGeo, grassTex;
   let toothMat, windowTextures = [];
 
   const $ = (id) => document.getElementById(id);
@@ -91,19 +92,24 @@
     coneGeo = new THREE.ConeGeometry(1, 1, 12);
     cylGeo = new THREE.CylinderGeometry(1, 1, 1, 14);
     sphereGeo = new THREE.SphereGeometry(1, 14, 12);
+    holeGeo = new THREE.CircleGeometry(0.8, 40);
+    holeWallGeo = new THREE.CylinderGeometry(0.8, 0.8, 1, 40, 1, true);
     toothMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
     const winBases = ['#7d93b8', '#8aa0c8', '#9fb0c8', '#6f8cc0', '#a9b7d0', '#86a0bf'];
     windowTextures = winBases.map(makeWinTex);
 
-    // 草地
+    // 草地（程序化斑驳贴图，不再是大纯色）
+    grassTex = makeGrassTex();
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(CFG.world * 2, CFG.world * 2),
-      new THREE.MeshLambertMaterial({ color: 0x7cc24a })
+      new THREE.MeshLambertMaterial({ map: grassTex })
     );
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);
 
     buildRoadNetwork();
+    buildGroundDecor();   // 公园 / 广场色块
+    buildSkyline();       // 边缘远景天际线楼群
 
     // 海洋（一角，装饰）
     const ocean = new THREE.Mesh(
@@ -298,6 +304,100 @@
     return { group: g, radius: 2.4, mass: 14 };
   }
 
+  // 草地质感：深浅绿斑驳 + 噪点，避免纯色
+  function makeGrassTex() {
+    const s = 256;
+    const c = document.createElement('canvas'); c.width = c.height = s;
+    const x = c.getContext('2d');
+    x.fillStyle = '#7cc24a'; x.fillRect(0, 0, s, s);
+    for (let i = 0; i < 2800; i++) {
+      const r = 100 + (Math.random() * 50 - 25);
+      const g = 150 + (Math.random() * 55 - 28);
+      const b = 60 + (Math.random() * 30 - 15);
+      x.fillStyle = 'rgba(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ',0.5)';
+      x.beginPath(); x.arc(Math.random() * s, Math.random() * s, Math.random() * 7 + 2, 0, 6.28); x.fill();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(18, 18);
+    return t;
+  }
+  // 公园 / 广场色块（装饰，不可吃）
+  function buildGroundDecor() {
+    const parkMat = new THREE.MeshLambertMaterial({ color: 0x57a83a });
+    const plazaMat = new THREE.MeshLambertMaterial({ color: 0xb9b2a6 });
+    const place = (mat, size) => {
+      for (let i = 0; i < 6; i++) {
+        let x, z, tries = 0;
+        do { x = rand(-190, 190); z = rand(-190, 190); tries++; }
+        while (tries < 20 && (onRoad(x, z) || inOcean(x, z) || Math.hypot(x, z) < 30));
+        const p = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
+        p.rotation.x = -Math.PI / 2; p.position.set(x, 0.015, z); scene.add(p);
+      }
+    };
+    place(parkMat, rand(40, 72));
+    place(plazaMat, rand(30, 56));
+  }
+  // 边缘远景天际线（装饰，不可吃）
+  function buildSkyline() {
+    const mat = new THREE.MeshLambertMaterial({ color: 0x9fb6d6 });
+    const ringR = 196;
+    for (let i = 0; i < 64; i++) {
+      const a = i / 64 * Math.PI * 2;
+      const rr = ringR + rand(-12, 12);
+      const w = rand(10, 22), h = rand(34, 130), d = rand(10, 22);
+      const m = new THREE.Mesh(boxGeo, mat);
+      m.scale.set(w, h, d);
+      m.position.set(Math.cos(a) * rr, h / 2, Math.sin(a) * rr);
+      m.rotation.y = rand(0, 6.28);
+      scene.add(m);
+    }
+  }
+  function buildLandmark() {
+    const w = rand(12, 18), h = rand(82, 120), d = rand(12, 18);
+    const g = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ map: pick(windowTextures), color: 0xeef2ff });
+    const body = new THREE.Mesh(boxGeo, mat); body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
+    const top = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x55606e }));
+    top.scale.set(w * 0.4, 3, d * 0.4); top.position.y = h + 1.5; g.add(top);
+    const ant = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x444444 }));
+    ant.scale.set(0.12, 5, 0.12); ant.position.y = h + 4; g.add(ant);
+    return { group: g, radius: 0.5 * Math.hypot(w, d), mass: 320 };
+  }
+  function buildBush() {
+    const g = new THREE.Group();
+    const m = new THREE.MeshLambertMaterial({ color: pick([0x3a8f3a, 0x4caf50, 0x2e7d32]) });
+    for (const o of [[-0.4, 0.5, 0], [0.4, 0.5, 0], [0, 0.75, 0.2]]) {
+      const b = new THREE.Mesh(sphereGeo, m);
+      b.scale.setScalar(pick([0.6, 0.85, 0.7])); b.position.set(o[0], o[1], o[2]); g.add(b);
+    }
+    return { group: g, radius: 0.9, mass: 4 };
+  }
+  function buildFlower() {
+    const g = new THREE.Group();
+    const stem = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x3a8f3a }));
+    stem.scale.set(0.06, 0.6, 0.06); stem.position.y = 0.3; g.add(stem);
+    const top = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: pick([0xff5a8a, 0xffd24d, 0xff7ad2, 0xffffff, 0x9b6bff]) }));
+    top.scale.setScalar(0.18); top.position.y = 0.65; g.add(top);
+    return { group: g, radius: 0.4, mass: 0.5 };
+  }
+  function buildBench() {
+    const g = new THREE.Group();
+    const wmat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
+    const seat = new THREE.Mesh(boxGeo, wmat); seat.scale.set(2, 0.15, 0.6); seat.position.y = 0.5; g.add(seat);
+    const back = new THREE.Mesh(boxGeo, wmat); back.scale.set(2, 0.5, 0.15); back.position.set(0, 0.8, -0.25); g.add(back);
+    for (const sx of [-0.9, 0.9]) for (const sz of [-0.25, 0.25]) {
+      const leg = new THREE.Mesh(boxGeo, wmat); leg.scale.set(0.15, 0.5, 0.15); leg.position.set(sx, 0.25, sz); g.add(leg);
+    }
+    return { group: g, radius: 1.2, mass: 6 };
+  }
+  function buildHydrant() {
+    const g = new THREE.Group();
+    const m = new THREE.MeshLambertMaterial({ color: 0xd63b2f });
+    const body = new THREE.Mesh(cylGeo, m); body.scale.set(0.3, 0.9, 0.3); body.position.y = 0.45; g.add(body);
+    const cap = new THREE.Mesh(sphereGeo, m); cap.scale.setScalar(0.32); cap.position.y = 0.9; g.add(cap);
+    return { group: g, radius: 0.5, mass: 3 };
+  }
+
   // ===================== 城市布置 =====================
   function tryPlace(x, z, margin) {
     if (onRoad(x, z)) return false;
@@ -414,6 +514,13 @@
     placeDeco(buildStreetLamp, 'lamp', 18, true);
     placeDeco(buildTrafficLight, 'light', 6, false);
     placeDeco(buildFence, 'fence', 5, false);
+    // 中心区地标超高层（天际线感）
+    for (let i = 0; i < 6; i++) placeDeco(buildLandmark, 'sky', 1, false);
+    // 草坪上的小道具：灌木、花、长椅、消防栓
+    for (let i = 0; i < 24; i++) placeDeco(buildBush, 'bush', 1, false);
+    for (let i = 0; i < 30; i++) placeDeco(buildFlower, 'flower', 1, false);
+    for (let i = 0; i < 8; i++) placeDeco(buildBench, 'bench', 1, false);
+    for (let i = 0; i < 6; i++) placeDeco(buildHydrant, 'hydrant', 1, false);
   }
 
   // ===================== 大嘴巴 =====================
@@ -446,18 +553,21 @@
   }
   function createMouth(opts) {
     const g = new THREE.Group();
-    const hole = new THREE.Mesh(circleGeo, new THREE.MeshBasicMaterial({ color: 0x07070d }));
-    hole.rotation.x = -Math.PI / 2; hole.position.y = 0.03; g.add(hole);
-    const depth = new THREE.Mesh(cylOpenGeo, new THREE.MeshBasicMaterial({ color: 0x05050a, side: THREE.BackSide }));
-    depth.position.y = -0.5; g.add(depth);
+    // 洞口：关闭深度测试并提到最上层，任何角度/任何地面（草地或马路）下内部都是纯黑
+    const holeMat = new THREE.MeshBasicMaterial({ color: 0x05050a, depthTest: false, depthWrite: false });
+    const hole = new THREE.Mesh(holeGeo, holeMat);
+    hole.rotation.x = -Math.PI / 2; hole.position.y = 0.06; hole.renderOrder = 3; g.add(hole);
+    // 洞壁（向下凹陷的暗壁）
+    const depth = new THREE.Mesh(holeWallGeo, new THREE.MeshBasicMaterial({ color: 0x04040a, side: THREE.BackSide }));
+    depth.position.y = -0.44; g.add(depth);
     const lip = new THREE.Mesh(torusGeo, new THREE.MeshLambertMaterial({ color: opts.color }));
-    lip.rotation.x = Math.PI / 2; lip.position.y = 0.08; g.add(lip);
+    lip.rotation.x = Math.PI / 2; lip.position.y = 0.1; lip.renderOrder = 1; g.add(lip);
     const tc = 18;
     for (let i = 0; i < tc; i++) {
       const a = i / tc * Math.PI * 2;
       const t = new THREE.Mesh(boxGeo, toothMat);
       t.scale.set(0.14, 0.24, 0.14);
-      t.position.set(Math.cos(a) * 0.9, 0.12, Math.sin(a) * 0.9);
+      t.position.set(Math.cos(a) * 0.9, 0.16, Math.sin(a) * 0.9);
       t.rotation.y = -a; g.add(t);
     }
     addEars(g, opts.earType, opts.earColor);
