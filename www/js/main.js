@@ -1,7 +1,7 @@
 (function () {
   'use strict';
 
-  // ===================== 配置（可随意调） =====================
+  // ===================== 配置 =====================
   const CFG = {
     world: 200,        // 地面半边长
     duration: 120,     // 单局秒数
@@ -9,10 +9,15 @@
     maxRadius: 52,
     playerSpeed: 30,   // 移动速度
     aiCount: 4,
-    preyCount: 175,
     growthK: 0.16,     // 吞噬成长系数
     eatRatio: 1.15     // 比对手大这么多才能吃它
   };
+
+  // 道路网格
+  const ROAD_X = [-90, 0, 90];
+  const ROAD_Z = [-90, 0, 90];
+  const ROAD_W = 22;     // 马路宽
+  const SIDE_W = 3.5;    // 人行道宽
 
   // ===================== 全局 =====================
   let scene, camera, renderer, clock;
@@ -20,6 +25,7 @@
   let mouths = [];
   let player = null;
   let ais = [];
+  let placed = [];       // 建筑间距记录
   let state = 'menu';
   let timeLeft = CFG.duration;
   let eatCount = 0;
@@ -32,11 +38,18 @@
   const $ = (id) => document.getElementById(id);
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
+  const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const dist2 = (m, p) => {
     const dx = m.group.position.x - p.group.position.x;
     const dz = m.group.position.z - p.group.position.z;
     return dx * dx + dz * dz;
   };
+  const inOcean = (x, z) => (x > 100 && z > 100);   // 海洋在 +,+ 角
+  function onRoad(x, z) {
+    for (const r of ROAD_Z) if (Math.abs(z - r) < ROAD_W / 2 + SIDE_W) return true;
+    for (const r of ROAD_X) if (Math.abs(x - r) < ROAD_W / 2 + SIDE_W) return true;
+    return false;
+  }
 
   // 窗户贴图，让楼房看起来有窗户
   function makeWinTex(base) {
@@ -90,17 +103,7 @@
     ground.rotation.x = -Math.PI / 2;
     scene.add(ground);
 
-    // 马路（十字 + 中线）
-    const roadMat = new THREE.MeshLambertMaterial({ color: 0x55555f });
-    const lineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const mkRoad = (w, l, x, z) => {
-      const r = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, l), roadMat);
-      r.position.set(x, 0.05, z); scene.add(r);
-      const line = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.12, l * 0.96), lineMat);
-      line.position.set(x, 0.12, z); scene.add(line);
-    };
-    mkRoad(20, CFG.world * 2, 0, 0);
-    mkRoad(CFG.world * 2, 20, 0, 0);
+    buildRoadNetwork();
 
     // 海洋（一角，装饰）
     const ocean = new THREE.Mesh(
@@ -115,13 +118,52 @@
     window.addEventListener('resize', onResize);
   }
 
+  // 3x3 路网：柏油 + 人行道 + 路缘石 + 黄色虚线车道线
+  function buildRoadNetwork() {
+    const roadMat = new THREE.MeshLambertMaterial({ color: 0x44444c });
+    const sideMat = new THREE.MeshLambertMaterial({ color: 0x909199 });
+    const curbMat = new THREE.MeshLambertMaterial({ color: 0xc2c2c2 });
+    const lineMat = new THREE.MeshBasicMaterial({ color: 0xffe27a });
+    const len = CFG.world * 2;
+    const addRoad = (axis, pos) => {
+      const w = axis === 'x' ? len : ROAD_W;
+      const d = axis === 'x' ? ROAD_W : len;
+      const a = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), roadMat);
+      a.position.set(axis === 'x' ? 0 : pos, 0.05, axis === 'x' ? pos : 0); scene.add(a);
+      const off = ROAD_W / 2 + SIDE_W / 2;
+      for (const s of [-1, 1]) {
+        const sw = axis === 'x' ? len : SIDE_W;
+        const sd = axis === 'x' ? SIDE_W : len;
+        const s1 = new THREE.Mesh(new THREE.BoxGeometry(sw, 0.16, sd), sideMat);
+        if (axis === 'x') s1.position.set(0, 0.08, pos + s * off); else s1.position.set(pos + s * off, 0.08, 0);
+        scene.add(s1);
+        const cw = axis === 'x' ? len : 0.4;
+        const cd = axis === 'x' ? 0.4 : len;
+        const c1 = new THREE.Mesh(new THREE.BoxGeometry(cw, 0.24, cd), curbMat);
+        if (axis === 'x') c1.position.set(0, 0.12, pos + s * (ROAD_W / 2)); else c1.position.set(pos + s * (ROAD_W / 2), 0.12, 0);
+        scene.add(c1);
+      }
+      const seg = 6, gap = 5, n = Math.floor(len / (seg + gap));
+      for (let i = 0; i < n; i++) {
+        const t = -len / 2 + i * (seg + gap) + seg / 2;
+        const lw = axis === 'x' ? seg : 0.5;
+        const ld = axis === 'x' ? 0.5 : seg;
+        const dash = new THREE.Mesh(new THREE.BoxGeometry(lw, 0.13, ld), lineMat);
+        if (axis === 'x') dash.position.set(t, 0.13, pos); else dash.position.set(pos, 0.13, t);
+        scene.add(dash);
+      }
+    };
+    for (const r of ROAD_Z) addRoad('x', r);
+    for (const r of ROAD_X) addRoad('z', r);
+  }
+
   function onResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  // ===================== 城市物件（猎物） =====================
+  // ===================== 城市物件 =====================
   function buildSkyscraper() {
     const w = rand(8, 14), h = rand(34, 74), d = rand(8, 14);
     const g = new THREE.Group();
@@ -129,6 +171,8 @@
     const body = new THREE.Mesh(boxGeo, mat); body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
     const top = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x55606e }));
     top.scale.set(w * 0.5, 2, d * 0.5); top.position.y = h + 1; g.add(top);
+    const ant = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x444444 }));
+    ant.scale.set(0.1, 3, 0.1); ant.position.y = h + 2.5; g.add(ant);
     return { group: g, radius: 0.5 * Math.hypot(w, d), mass: 220 };
   }
   function buildApartment() {
@@ -152,9 +196,9 @@
   function buildShop() {
     const w = rand(10, 15), h = rand(8, 12), d = rand(10, 13);
     const g = new THREE.Group();
-    const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick([0xbfe3c8, 0xcfe0ff, 0xffe0e6]) }));
+    const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick([0xbfe3c8, 0xcfe0ff, 0xffe0e6, 0xfff0c0]) }));
     body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
-    const awn = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xff5a5a }));
+    const awn = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick([0xff5a5a, 0x4aa3ff, 0xff9d3d, 0x57d98a]) }));
     awn.scale.set(w, 1.2, 2); awn.position.set(0, h - 1, d / 2 + 1); g.add(awn);
     const sign = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x3a7bd5 }));
     sign.scale.set(w * 0.7, 2, 0.6); sign.position.set(0, h + 1.5, 0); g.add(sign);
@@ -162,33 +206,52 @@
   }
   function buildCar() {
     const g = new THREE.Group();
-    const color = pick([0xff4d4d, 0x4d79ff, 0x4dd07a, 0xffd24d, 0xff7ad2, 0xff9d3d]);
+    const color = pick([0xff4d4d, 0x4d79ff, 0x4dd07a, 0xffd24d, 0xff7ad2, 0xff9d3d, 0xffffff, 0x222831]);
     const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color }));
-    body.scale.set(2.2, 1.2, 4.2); body.position.y = 0.9; g.add(body);
+    body.scale.set(2.4, 1.1, 4.6); body.position.y = 0.95; g.add(body);
     const cabin = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x222831 }));
-    cabin.scale.set(1.9, 1.0, 2.2); cabin.position.set(0, 1.9, -0.2); g.add(cabin);
+    cabin.scale.set(2.0, 0.9, 2.2); cabin.position.set(0, 1.8, -0.2); g.add(cabin);
     const wmat = new THREE.MeshLambertMaterial({ color: 0x111111 });
-    const wp = [[-1.0, 0.5, 1.4], [1.0, 0.5, 1.4], [-1.0, 0.5, -1.4], [1.0, 0.5, -1.4]];
+    const wheels = [];
+    const wp = [[-1.0, 0.5, 1.5], [1.0, 0.5, 1.5], [-1.0, 0.5, -1.5], [1.0, 0.5, -1.5]];
     for (const p of wp) {
       const wheel = new THREE.Mesh(cylGeo, wmat);
       wheel.scale.set(0.5, 0.3, 0.5); wheel.rotation.z = Math.PI / 2;
-      wheel.position.set(p[0], p[1], p[2]); g.add(wheel);
+      wheel.position.set(p[0], p[1], p[2]); g.add(wheel); wheels.push(wheel);
     }
-    return { group: g, radius: 2.4, mass: 7 };
+    const hl = new THREE.Mesh(boxGeo, new THREE.MeshBasicMaterial({ color: 0xfff2b0 }));
+    hl.scale.set(1.8, 0.3, 0.2); hl.position.set(0, 1.0, 2.3); g.add(hl);
+    return { group: g, radius: 2.6, mass: 8, parts: { wheels } };
   }
+  // 行人：分高矮、可戴帽子，四肢用 pivot 便于摆动
   function buildPerson() {
     const g = new THREE.Group();
-    const skin = pick([0xffcc99, 0xf1c27d, 0xe0ac69, 0xc68642]);
-    const cloth = pick([0xff6b6b, 0x4d96ff, 0x6bcb77, 0xffd93d, 0xb983ff, 0xff9f1c]);
+    const skin = pick([0xffcc99, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524]);
+    const cloth = pick([0xff6b6b, 0x4d96ff, 0x6bcb77, 0xffd93d, 0xb983ff, 0xff9f1c, 0x2ec4b6, 0xe71d73, 0x34495e]);
+    const lg = 0.9;                 // 腿长
+    const h = rand(0.9, 1.3);       // 躯干高
     const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: cloth }));
-    body.scale.set(0.8, 1.1, 0.5); body.position.y = 0.95; g.add(body);
+    body.scale.set(0.8, h, 0.5); body.position.y = lg + h / 2; g.add(body);
     const head = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: skin }));
-    head.scale.set(0.6, 0.6, 0.6); head.position.y = 1.85; g.add(head);
-    for (const s of [-1, 1]) {
-      const arm = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: cloth }));
-      arm.scale.set(0.22, 0.9, 0.22); arm.position.set(s * 0.55, 0.95, 0); g.add(arm);
+    head.scale.set(0.6, 0.6, 0.6); head.position.y = lg + h + 0.3; g.add(head);
+    if (Math.random() < 0.35) {
+      const hat = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick([0x222222, 0x8b5a2b, 0xc0392b, 0x2e86de]) }));
+      hat.scale.set(0.66, 0.22, 0.66); hat.position.y = lg + h + 0.6; g.add(hat);
     }
-    return { group: g, radius: 0.7, mass: 1.2 };
+    const mkLimb = (w, len, x, jointY, col) => {
+      const pivot = new THREE.Group();
+      pivot.position.set(x, jointY, 0);
+      const m = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: col }));
+      m.scale.set(w, len, w); m.position.y = -len / 2; pivot.add(m); g.add(pivot);
+      return pivot;
+    };
+    const parts = {
+      armL: mkLimb(0.2, 0.8, -0.5, lg + h * 0.9, cloth),
+      armR: mkLimb(0.2, 0.8, 0.5, lg + h * 0.9, cloth),
+      legL: mkLimb(0.22, lg, -0.22, lg, 0x2b2b35),
+      legR: mkLimb(0.22, lg, 0.22, lg, 0x2b2b35)
+    };
+    return { group: g, radius: 0.7, mass: 1.2, parts };
   }
   function buildTree() {
     const g = new THREE.Group();
@@ -197,6 +260,16 @@
     const foli = new THREE.Mesh(coneGeo, new THREE.MeshLambertMaterial({ color: pick([0x3fa34d, 0x4caf50, 0x2e8b57]) }));
     foli.scale.set(1.8, 4, 1.8); foli.position.y = 4; g.add(foli);
     return { group: g, radius: 1.6, mass: 11 };
+  }
+  function buildStreetLamp() {
+    const g = new THREE.Group();
+    const pole = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x333333 }));
+    pole.scale.set(0.18, 5, 0.18); pole.position.y = 2.5; g.add(pole);
+    const arm = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x333333 }));
+    arm.scale.set(0.18, 0.18, 1.4); arm.position.set(0, 5, 0.6); g.add(arm);
+    const bulb = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0xfff2b0 }));
+    bulb.scale.setScalar(0.3); bulb.position.set(0, 4.9, 1.2); g.add(bulb);
+    return { group: g, radius: 0.8, mass: 3 };
   }
   function buildTrafficLight() {
     const g = new THREE.Group();
@@ -225,81 +298,150 @@
     return { group: g, radius: 2.4, mass: 14 };
   }
 
-  const BUILDERS = [
-    ['sky', buildSkyscraper, 0.10],
-    ['apt', buildApartment, 0.16],
-    ['house', buildHouse, 0.16],
-    ['shop', buildShop, 0.10],
-    ['car', buildCar, 0.14],
-    ['person', buildPerson, 0.18],
-    ['tree', buildTree, 0.10],
-    ['light', buildTrafficLight, 0.03],
-    ['fence', buildFence, 0.03]
-  ];
-  function weightedType() {
-    const total = BUILDERS.reduce((s, b) => s + b[2], 0);
-    let r = Math.random() * total;
-    for (const b of BUILDERS) { r -= b[2]; if (r <= 0) return b; }
-    return BUILDERS[0];
+  // ===================== 城市布置 =====================
+  function tryPlace(x, z, margin) {
+    if (onRoad(x, z)) return false;
+    if (inOcean(x, z)) return false;
+    if (Math.hypot(x, z) < 26) return false;   // 玩家起步区域留空
+    for (const q of placed) if (Math.hypot(x - q.x, z - q.z) < q.r + margin) return false;
+    return true;
+  }
+  function placeBuilding(fn, kind) {
+    for (let t = 0; t < 18; t++) {
+      const x = rand(-190, 190), z = rand(-190, 190);
+      const margin = rand(7, 12);
+      if (!tryPlace(x, z, margin * 0.7)) continue;
+      const res = fn();
+      res.group.position.set(x, 0, z);
+      res.group.rotation.y = rand(0, 6.28);
+      scene.add(res.group);
+      preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind });
+      placed.push({ x, z, r: res.radius * 0.6 });
+      return;
+    }
+  }
+  function placeRoadsideShops(n) {
+    let made = 0, guard = 0;
+    while (made < n && guard < 500) {
+      guard++;
+      const axis = Math.random() < 0.5 ? 'x' : 'z';
+      const roads = axis === 'x' ? ROAD_Z : ROAD_X;
+      const r = pick(roads);
+      const along = rand(-CFG.world + 12, CFG.world - 12);
+      const side = Math.random() < 0.5 ? -1 : 1;
+      const off = ROAD_W / 2 + SIDE_W + rand(2, 5);
+      let x, z;
+      if (axis === 'x') { x = along; z = r + side * off; } else { z = along; x = r + side * off; }
+      if (inOcean(x, z) || Math.hypot(x, z) < 26) continue;
+      let ok = true;
+      for (const q of placed) if (Math.hypot(x - q.x, z - q.z) < q.r + 5) { ok = false; break; }
+      if (!ok) continue;
+      const res = buildShop();
+      res.group.position.set(x, 0, z);
+      res.group.rotation.y = axis === 'x' ? (side < 0 ? Math.PI / 2 : -Math.PI / 2) : (side < 0 ? 0 : Math.PI);
+      scene.add(res.group);
+      preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind: 'shop' });
+      placed.push({ x, z, r: res.radius * 0.6 });
+      made++;
+    }
+  }
+  function placeWalker() {
+    for (let t = 0; t < 18; t++) {
+      const x = rand(-185, 185), z = rand(-185, 185);
+      if (onRoad(x, z) || inOcean(x, z) || Math.hypot(x, z) < 24) continue;
+      const res = buildPerson();
+      res.group.position.set(x, 0, z);
+      scene.add(res.group);
+      preys.push({
+        group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind: 'person',
+        parts: res.parts, walk: { tx: rand(-180, 180), tz: rand(-180, 180), spd: rand(0, 3), phase: rand(0, 6.28) }
+      });
+      return;
+    }
+  }
+  function placeCar() {
+    const axis = Math.random() < 0.5 ? 'x' : 'z';
+    const roads = axis === 'x' ? ROAD_Z : ROAD_X;
+    const r = pick(roads);
+    const lane = (Math.random() < 0.5 ? -1 : 1) * (ROAD_W / 2 - 5);
+    const along = rand(-CFG.world + 12, CFG.world - 12);
+    const dir = Math.random() < 0.5 ? 1 : -1;
+    let x, z;
+    if (axis === 'x') { x = along; z = r + lane; } else { z = along; x = r + lane; }
+    const res = buildCar();
+    res.group.position.set(x, 0, z);
+    scene.add(res.group);
+    preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind: 'car', parts: res.parts, car: { axis, dir, spd: rand(14, 22) } });
+  }
+  function placeDeco(fn, kind, n, onSidewalk) {
+    for (let i = 0; i < n; i++) {
+      let x, z, tries = 0;
+      do {
+        tries++;
+        if (onSidewalk) {
+          const axis = Math.random() < 0.5 ? 'x' : 'z';
+          const roads = axis === 'x' ? ROAD_Z : ROAD_X;
+          const r = pick(roads);
+          const along = rand(-CFG.world + 12, CFG.world - 12);
+          const side = Math.random() < 0.5 ? -1 : 1;
+          const off = ROAD_W / 2 + SIDE_W / 2;
+          if (axis === 'x') { x = along; z = r + side * off; } else { z = along; x = r + side * off; }
+        } else {
+          x = rand(-190, 190); z = rand(-190, 190);
+        }
+      } while (tries < 20 && (onRoad(x, z) && !onSidewalk || inOcean(x, z) || Math.hypot(x, z) < 24));
+      const res = fn();
+      res.group.position.set(x, 0, z);
+      res.group.rotation.y = rand(0, 6.28);
+      scene.add(res.group);
+      preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind });
+    }
   }
   function spawnPreys() {
-    for (let i = 0; i < CFG.preyCount; i++) {
-      const b = weightedType();
-      const res = b[1]();
-      const g = res.group;
-      let x, z;
-      do {
-        x = rand(-CFG.world + 12, CFG.world - 12);
-        z = rand(-CFG.world + 12, CFG.world - 12);
-      } while (Math.hypot(x, z) < 22);
-      g.position.set(x, 0, z);
-      g.rotation.y = rand(0, Math.PI * 2);
-      scene.add(g);
-      preys.push({ group: g, radius: res.radius, mass: res.mass, eaten: false, eater: null });
-    }
+    placed.length = 0;
+    // 街区建筑
+    for (let i = 0; i < 48; i++) placeBuilding(buildSkyscraper, 'sky');
+    for (let i = 0; i < 42; i++) placeBuilding(buildApartment, 'apt');
+    for (let i = 0; i < 34; i++) placeBuilding(buildHouse, 'house');
+    // 路边商店
+    placeRoadsideShops(36);
+    // 行人（会走动）
+    for (let i = 0; i < 20; i++) placeWalker();
+    // 车辆（在公路上行驶）
+    for (let i = 0; i < 12; i++) placeCar();
+    // 树、路灯、红绿灯、围栏
+    for (let i = 0; i < 18; i++) placeDeco(buildTree, 'tree', 1, false);
+    placeDeco(buildStreetLamp, 'lamp', 18, true);
+    placeDeco(buildTrafficLight, 'light', 6, false);
+    placeDeco(buildFence, 'fence', 5, false);
   }
 
   // ===================== 大嘴巴 =====================
+  // 耳朵：贴着草地向外摊平，不立起来
   function addEars(g, type, color) {
     const mat = new THREE.MeshLambertMaterial({ color });
+    const addEar = (angle, make) => {
+      const pivot = new THREE.Group();
+      pivot.rotation.y = angle;
+      const ear = make();
+      ear.position.set(0, 0.06, 1.02);        // 洞口边缘外侧，贴地
+      ear.rotation.x = Math.PI / 2 - 0.16;     // 放倒：整体趴在草地上，尖端略翘
+      pivot.add(ear);
+      g.add(pivot);
+    };
+    const coneEar = (r, h) => { const e = new THREE.Mesh(coneGeo, mat); e.scale.set(r, h, r); return e; };
+    const boxEar = (w, h, d) => { const e = new THREE.Mesh(boxGeo, mat); e.scale.set(w, h, d); return e; };
+    const sphEar = (r) => { const e = new THREE.Mesh(sphereGeo, mat); e.scale.set(r, 0.14, r); return e; };
     if (type === 'cat') {
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Mesh(coneGeo, mat);
-        ear.scale.set(0.42, 0.8, 0.42);
-        const a = Math.PI / 2 + s * 0.55;
-        ear.position.set(Math.cos(a) * 0.82, 0.45, Math.sin(a) * 0.82);
-        ear.rotation.z = s * 0.18; ear.rotation.x = -0.25; g.add(ear);
-      }
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.7, () => coneEar(0.32, 0.7));
     } else if (type === 'bunny') {
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Mesh(coneGeo, mat);
-        ear.scale.set(0.26, 1.3, 0.26);
-        const a = Math.PI / 2 + s * 0.4;
-        ear.position.set(Math.cos(a) * 0.6, 0.7, Math.sin(a) * 0.6); g.add(ear);
-      }
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.5, () => coneEar(0.2, 1.1));
     } else if (type === 'bear') {
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Mesh(sphereGeo, mat);
-        ear.scale.setScalar(0.32);
-        const a = Math.PI / 2 + s * 0.6;
-        ear.position.set(Math.cos(a) * 0.78, 0.3, Math.sin(a) * 0.78); g.add(ear);
-      }
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.8, () => sphEar(0.3));
     } else if (type === 'dog') {
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Mesh(boxGeo, mat);
-        ear.scale.set(0.3, 0.7, 0.16);
-        const a = Math.PI / 2 + s * 0.6;
-        ear.position.set(Math.cos(a) * 0.82, 0.1, Math.sin(a) * 0.82);
-        ear.rotation.x = 0.6; ear.rotation.z = s * 0.1; g.add(ear);
-      }
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.8, () => boxEar(0.28, 0.12, 0.55));
     } else { // fox
-      for (const s of [-1, 1]) {
-        const ear = new THREE.Mesh(coneGeo, mat);
-        ear.scale.set(0.34, 0.9, 0.34);
-        const a = Math.PI / 2 + s * 0.5;
-        ear.position.set(Math.cos(a) * 0.7, 0.5, Math.sin(a) * 0.7);
-        ear.rotation.x = -0.3; ear.rotation.z = s * 0.25; g.add(ear);
-      }
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.6, () => coneEar(0.3, 0.8));
     }
   }
   function createMouth(opts) {
@@ -423,6 +565,47 @@
       }
     }
   }
+  // 行人漫步：走向随机目标，四肢摆动 + 上下颠簸
+  function updatePerson(p, dt) {
+    const w = p.walk;
+    let dx = w.tx - p.group.position.x, dz = w.tz - p.group.position.z;
+    let d = Math.hypot(dx, dz);
+    if (d < 2) {
+      w.tx = rand(-CFG.world + 15, CFG.world - 15);
+      w.tz = rand(-CFG.world + 15, CFG.world - 15);
+      if (inOcean(w.tx, w.tz)) { w.tx = -100; w.tz = -100; }
+      dx = w.tx - p.group.position.x; dz = w.tz - p.group.position.z; d = Math.hypot(dx, dz);
+    }
+    const sp = 4 + w.spd;
+    const ux = dx / (d || 1), uz = dz / (d || 1);
+    p.group.position.x = clamp(p.group.position.x + ux * sp * dt, -CFG.world + 5, CFG.world - 5);
+    p.group.position.z = clamp(p.group.position.z + uz * sp * dt, -CFG.world + 5, CFG.world - 5);
+    p.group.rotation.y = Math.atan2(ux, uz);
+    w.phase += dt * (6 + w.spd);
+    const sw = Math.sin(w.phase) * 0.5;
+    if (p.parts) {
+      p.parts.armL.rotation.x = sw; p.parts.armR.rotation.x = -sw;
+      p.parts.legL.rotation.x = -sw; p.parts.legR.rotation.x = sw;
+    }
+    p.group.position.y = Math.abs(Math.sin(w.phase)) * 0.1;
+  }
+  // 车辆沿公路行驶，车轮转动
+  function updateCar(p, dt) {
+    const c = p.car;
+    const lim = CFG.world - 8;
+    if (c.axis === 'x') {
+      p.group.position.x += c.dir * c.spd * dt;
+      if (p.group.position.x > lim) p.group.position.x = -lim;
+      else if (p.group.position.x < -lim) p.group.position.x = lim;
+      p.group.rotation.y = c.dir > 0 ? Math.PI / 2 : -Math.PI / 2;
+    } else {
+      p.group.position.z += c.dir * c.spd * dt;
+      if (p.group.position.z > lim) p.group.position.z = -lim;
+      else if (p.group.position.z < -lim) p.group.position.z = lim;
+      p.group.rotation.y = c.dir > 0 ? 0 : Math.PI;
+    }
+    if (p.parts) for (const w of p.parts.wheels) w.rotateX(c.spd * dt * 0.5);
+  }
   function updatePrey(p, dt) {
     if (!p.eaten) return;
     const e = p.eater;
@@ -524,6 +707,11 @@
       updatePlayer(dt);
       for (const m of mouths) if (!m.isPlayer) updateAI(m, dt);
       for (const m of mouths) eatPreyCheck(m);
+      for (const p of preys) {
+        if (p.eaten) continue;
+        if (p.kind === 'person') updatePerson(p, dt);
+        else if (p.kind === 'car') updateCar(p, dt);
+      }
       for (let i = preys.length - 1; i >= 0; i--) updatePrey(preys[i], dt);
       resolveMouths();
       for (const m of mouths) updateMouthFall(m, dt);
