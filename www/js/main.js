@@ -52,6 +52,103 @@
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const inOcean = (x, z) => (x > 100 && z > 100);
+  let stickBase = null, stickKnob = null, playerTag = null, playerTagFill = null, playerTagText = null;
+  const aiTags = [];
+  const ray = new THREE.Ray(), tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpProj = new THREE.Vector3();
+  // 动态 UI：虚拟摇杆（参考录屏的基座圈+方向球）与 LVL 等级标签
+  function buildDynamicUI() {
+    if (!document.body || !document.createElement) return;
+    try {
+      const mk = (css) => {
+        const d = document.createElement('div');
+        d.style.cssText = css;
+        document.body.appendChild(d);
+        return d;
+      };
+      stickBase = mk('position:fixed;left:0;top:0;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;border:2px solid rgba(255,255,255,0.8);background:rgba(255,255,255,0.15);pointer-events:none;z-index:30;display:none;');
+      stickKnob = mk('position:fixed;left:0;top:0;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(255,255,255,0.95);box-shadow:0 2px 8px rgba(0,0,0,0.3);pointer-events:none;z-index:31;display:none;');
+      // 玩家等级标签：LVL 文本 + 黑底蓝条进度
+      playerTag = mk('position:fixed;left:-999px;top:-999px;transform:translate(-50%,-100%);pointer-events:none;z-index:25;text-align:center;');
+      playerTagText = document.createElement('div');
+      playerTagText.style.cssText = 'font-weight:700;font-size:15px;color:#37c8ff;text-shadow:0 1px 3px rgba(0,0,0,0.6);letter-spacing:1px;';
+      playerTagText.textContent = 'LVL 1';
+      playerTag.appendChild(playerTagText);
+      const bar = document.createElement('div');
+      bar.style.cssText = 'width:74px;height:13px;margin:2px auto 0;background:#22242e;border:1px solid rgba(255,255,255,0.3);border-radius:7px;overflow:hidden;';
+      playerTagFill = document.createElement('div');
+      playerTagFill.style.cssText = 'height:100%;width:0%;background:#37c8ff;border-radius:7px;';
+      bar.appendChild(playerTagFill);
+      playerTag.appendChild(bar);
+      // AI 标签：彩色 LVL 文本
+      for (let i = 0; i < CFG.aiCount; i++) {
+        const t = mk('position:fixed;left:-999px;top:-999px;transform:translate(-50%,-100%);pointer-events:none;z-index:24;font-weight:700;font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,0.65);');
+        t.textContent = 'LVL 1';
+        aiTags.push(t);
+      }
+    } catch (e) { stickBase = stickKnob = null; }
+  }
+  // 等级分档：r<8 LVL1 / <16 LVL2 / <26 LVL3 / <40 LVL4 / 其余 LVL5
+  function lvlOf(r) {
+    const bands = [8, 16, 26, 40, 1e9];
+    let i = 0;
+    while (r >= bands[i]) i++;
+    const lo = i === 0 ? CFG.startRadius : bands[i - 1];
+    return { lvl: i + 1, prog: clamp((r - lo) / (bands[i] - lo), 0, 1) };
+  }
+  // 每帧把洞上方锚点投影到屏幕，更新 LVL 标签位置
+  function updateLabels() {
+    if (!playerTag) return;
+    if (state !== 'playing' || !player) {
+      playerTag.style.display = 'none';
+      for (const t of aiTags) t.style.display = 'none';
+      return;
+    }
+    // 标签锚定洞的屏幕上缘：投影洞远侧圆边点（远离相机的一侧），标签放在其上方
+    tmpProj.set(player.group.position.x, 0, player.group.position.z - player.r * 1.3).project(camera);
+    if (tmpProj.z < 1) {
+      playerTag.style.display = 'block';
+      playerTag.style.left = ((tmpProj.x * 0.5 + 0.5) * window.innerWidth) + 'px';
+      playerTag.style.top = ((-tmpProj.y * 0.5 + 0.5) * window.innerHeight - 8) + 'px';
+      const L = lvlOf(player.r);
+      playerTagText.textContent = 'LVL ' + L.lvl;
+      playerTagFill.style.width = Math.round(L.prog * 100) + '%';
+    } else playerTag.style.display = 'none';
+    let i = 0;
+    for (const m of mouths) {
+      if (m.isPlayer || i >= aiTags.length) continue;
+      const t = aiTags[i++];
+      tmpProj.set(m.group.position.x, 0, m.group.position.z - m.r * 1.3).project(camera);
+      if (tmpProj.z < 1 && !m.falling) {
+        t.style.display = 'block';
+        t.style.left = ((tmpProj.x * 0.5 + 0.5) * window.innerWidth) + 'px';
+        t.style.top = ((-tmpProj.y * 0.5 + 0.5) * window.innerHeight - 6) + 'px';
+        t.textContent = 'LVL ' + lvlOf(m.r).lvl;
+        t.style.color = '#' + (m.color || 0xffffff).toString(16).padStart(6, '0');
+      } else t.style.display = 'none';
+    }
+  }
+  // 挡视建筑渐隐：相机->玩家连线命中的建筑淡化到 0.35
+  function updateFade() {
+    if (!player) return;
+    const p = player.group.position;
+    tmpV.set(p.x - camera.position.x, 1 - camera.position.y, p.z - camera.position.z).normalize();
+    ray.set(camera.position, tmpV);
+    for (const pr of preys) {
+      if (pr.eaten || !pr.box) continue;
+      const target = ray.intersectBox(pr.box, tmpV2) ? 0.35 : 1;
+      if (pr.fade !== target) {
+        pr.fade += (target - pr.fade) * 0.28;
+        if (Math.abs(pr.fade - target) < 0.02) pr.fade = target;
+        const f = pr.fade;
+        pr.group.traverse(o => {
+          if (o.isMesh && o.material && o.renderOrder !== -2) {
+            o.material.transparent = true;
+            o.material.opacity = f;
+          }
+        });
+      }
+    }
+  }
   function onRoad(x, z) {
     for (const r of ROAD_Z) if (Math.abs(z - r) < OCC) return true;
     for (const r of ROAD_X) if (Math.abs(x - r) < OCC) return true;
@@ -688,7 +785,11 @@
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.34, depthWrite: false })
     );
     blob.rotation.x = -Math.PI / 2; blob.position.y = 0.18; blob.renderOrder = -2; res.group.add(blob);
-    preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind });
+    let box = null;
+    if (kind === 'row' || kind === 'tower') {
+      try { box = new THREE.Box3().setFromObject(res.group); } catch (e) { box = null; }
+    }
+    preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind, box, fade: 1 });
     placed.push({ x, z, r: res.radius * 0.55 });
   }
   // 街区：道路之间的矩形区域
@@ -967,7 +1068,7 @@
     const group = createMouth(opts);
     const m = {
       group, r: opts.r || CFG.startRadius, isPlayer: !!opts.isPlayer, earType: opts.earType,
-      falling: false, eater: null, fallScale: 1, wander: rand(0, 6.28)
+      color: opts.color, falling: false, eater: null, fallScale: 1, wander: rand(0, 6.28)
     };
     group.scale.setScalar(m.r);
     group.position.set(opts.x || 0, 0, opts.z || 0);
@@ -1230,6 +1331,8 @@
       if (timeLeft <= 0) endGame('time');
     }
     updateCamera();
+    updateFade();
+    updateLabels();
     renderer.render(scene, camera);
   }
 
@@ -1257,18 +1360,34 @@
       const len = Math.hypot(dx, dy);
       if (len > max) { dx = dx / len * max; dy = dy / len * max; }
       input.vx = dx / max; input.vz = dy / max;
+      return [dx, dy];
     };
     el.addEventListener('pointerdown', (e) => {
       if (state !== 'playing') return;
       pid = e.pointerId; ox = e.clientX; oy = e.clientY;
       input.vx = 0; input.vz = 0;
+      if (stickBase) {
+        stickBase.style.left = ox + 'px'; stickBase.style.top = oy + 'px';
+        stickBase.style.display = 'block';
+        stickKnob.style.left = ox + 'px'; stickKnob.style.top = oy + 'px';
+        stickKnob.style.display = 'block';
+      }
       if (el.setPointerCapture) el.setPointerCapture(pid);
     });
     el.addEventListener('pointermove', (e) => {
       if (pid === null || e.pointerId !== pid) return;
-      setFromTouch(e.clientX, e.clientY);
+      const [dx, dy] = setFromTouch(e.clientX, e.clientY);
+      if (stickKnob) {
+        stickKnob.style.left = (ox + dx) + 'px';
+        stickKnob.style.top = (oy + dy) + 'px';
+      }
     });
-    const end = (e) => { if (e.pointerId === pid) { pid = null; input.vx = 0; input.vz = 0; } };
+    const end = (e) => {
+      if (e.pointerId === pid) {
+        pid = null; input.vx = 0; input.vz = 0;
+        if (stickBase) { stickBase.style.display = 'none'; stickKnob.style.display = 'none'; }
+      }
+    };
     el.addEventListener('pointerup', end);
     el.addEventListener('pointercancel', end);
     const keys = {};
@@ -1299,6 +1418,7 @@
   }
   function init() {
     initWorld();
+    buildDynamicUI();
     setupInput();
     $('playBtn').addEventListener('click', () => {
       if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
