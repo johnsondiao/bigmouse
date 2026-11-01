@@ -10,8 +10,8 @@ android {
         applicationId "com.bigmouse"
         minSdk 24
         targetSdk 34
-        versionCode 9
-        versionName "1.8.0"
+        versionCode 10
+        versionName "1.9.0"
     }
 
     // 复用 AGP 自带的 debug 签名来签 release，保证 CI 产出的 APK 可直接安装，
