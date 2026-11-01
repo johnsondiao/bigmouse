@@ -192,7 +192,7 @@
     scene.background = new THREE.Color(0xa8ddf5);
     scene.fog = new THREE.Fog(0xa8ddf5, 300, 520);
 
-    camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1200);
+    camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 2600);
 
     scene.add(new THREE.HemisphereLight(0xe8f4ff, 0x9cc46e, 0.78));
     const dir = new THREE.DirectionalLight(0xfff4e0, 0.5);
@@ -215,9 +215,10 @@
     crossTex = makeCrossTex();
 
     grassTex = makeGrassTex();
+    grassTex.repeat.set(18, 18);   // 地面扩到 1200x1200 后按比例加密，保持草皮密度
     holeTex = makeHoleTex();
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(CFG.world * 2, CFG.world * 2),
+      new THREE.PlaneGeometry(CFG.world * 6, CFG.world * 6),
       new THREE.MeshLambertMaterial({ map: grassTex })
     );
     ground.rotation.x = -Math.PI / 2;
@@ -1194,10 +1195,19 @@
     if (window.__freezeCam) return;
     window.__cam = camera;
     const r = player ? player.r : CFG.startRadius;
-    const off = new THREE.Vector3(0, 34 + r * 1.45, 18 + r * 1.15);
     const p = player ? player.group.position : new THREE.Vector3();
-    camera.position.set(p.x + off.x, off.y, p.z + off.z);
+    // 视角随体型演进：相机距离正比于洞半径（洞在画面中占比恒定≈12%），
+    // 俯角 52°(小洞贴地矮视角) -> 66°(大洞高空俯瞰) 渐变
+    const t = clamp((r - CFG.startRadius) / (CFG.maxRadius - CFG.startRadius), 0, 1);
+    const theta = (52 + t * 14) * Math.PI / 180;
+    const D = 10.5 * r;
+    camera.position.set(p.x, D * Math.sin(theta), p.z + D * Math.cos(theta));
     camera.lookAt(p.x, 0, p.z);
+    // 雾随相机高度外推：小洞保持原雾；大洞高空时把雾推到地平线，避免全城被糊
+    if (scene.fog) {
+      scene.fog.near = Math.max(300, D * 1.02);
+      scene.fog.far = Math.max(520, D * 1.75);
+    }
   }
   function loop() {
     requestAnimationFrame(loop);
