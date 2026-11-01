@@ -66,20 +66,18 @@
     const s = 512;
     const c = cv(s, s); const x = c.getContext('2d');
     x.fillStyle = '#6fb83f'; x.fillRect(0, 0, s, s);
-    // 大块深浅草色斑驳
-    for (let i = 0; i < 60; i++) {
-      const lighter = Math.random() < 0.5;
-      const r = 180 + Math.random() * 60, g = 200 + Math.random() * 40, b = 80 + Math.random() * 30;
-      x.fillStyle = lighter ? 'rgba(' + (r | 0) + ',' + (g | 0) + ',' + (b | 0) + ',0.28)'
-                            : 'rgba(70,140,55,0.30)';
-      x.beginPath(); x.ellipse(Math.random() * s, Math.random() * s, Math.random() * 90 + 40, Math.random() * 70 + 30, Math.random() * 3.14, 0, 6.28); x.fill();
+    // 大块明显深浅草色（不透明叠加，保证对比）
+    for (let i = 0; i < 80; i++) {
+      const dark = Math.random() < 0.5;
+      x.fillStyle = dark ? 'rgba(74,130,42,0.5)' : 'rgba(158,210,98,0.5)';
+      x.beginPath(); x.ellipse(Math.random() * s, Math.random() * s, Math.random() * 120 + 50, Math.random() * 90 + 40, Math.random() * 3.14, 0, 6.28); x.fill();
     }
     // 草叶短笔触（深浅交错）
     for (let i = 0; i < 5200; i++) {
       const px = Math.random() * s, py = Math.random() * s;
       const dark = Math.random() < 0.5;
       x.strokeStyle = dark ? 'rgba(54,118,42,0.55)' : 'rgba(150,210,90,0.55)';
-      x.lineWidth = 1.4;
+      x.lineWidth = 2.2;
       x.beginPath(); x.moveTo(px, py); x.lineTo(px + (Math.random() * 2 - 1), py - (Math.random() * 5 + 3)); x.stroke();
     }
     // 零星小花与碎石
@@ -89,7 +87,7 @@
       x.beginPath(); x.arc(px, py, Math.random() * 1.6 + 0.8, 0, 6.28); x.fill();
     }
     const t = new THREE.CanvasTexture(c);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 10);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 6);
     t.anisotropy = 4;
     return t;
   }
@@ -107,7 +105,7 @@
       }
     }
     x.fillStyle = frame; x.fillRect(6, 9, 20, 42);      // 窗框
-    x.fillStyle = glass; x.fillRect(9, 12, 14, 36);       // 玻璃
+    x.fillStyle = '#6d86b0'; x.fillRect(9, 12, 14, 36);       // 玻璃（提亮，避免像黑洞）
     x.fillStyle = 'rgba(255,255,255,0.20)'; x.fillRect(9, 12, 14, 8);
     x.fillStyle = frame; x.fillRect(5, 48, 22, 4);       // 窗台
     const t = new THREE.CanvasTexture(c);
@@ -184,8 +182,8 @@
     camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1200);
 
     scene.add(new THREE.HemisphereLight(0xcfeaff, 0x74b355, 1.05));
-    const dir = new THREE.DirectionalLight(0xfff4e0, 0.75);
-    dir.position.set(70, 130, 50);
+    const dir = new THREE.DirectionalLight(0xfff4e0, 0.9);
+    dir.position.set(80, 150, 60);
     scene.add(dir);
 
     boxGeo = new THREE.BoxGeometry(1, 1, 1);
@@ -209,6 +207,7 @@
       new THREE.MeshLambertMaterial({ map: grassTex })
     );
     ground.rotation.x = -Math.PI / 2;
+    ground.receiveShadow = true;
     scene.add(ground);
 
     buildRoadNetwork();
@@ -244,14 +243,14 @@
       const w = axis === 'x' ? len : ROAD_W;
       const d = axis === 'x' ? ROAD_W : len;
       const a = new THREE.Mesh(new THREE.BoxGeometry(w, 0.1, d), roadMat);
-      a.position.set(axis === 'x' ? 0 : pos, 0.05, axis === 'x' ? pos : 0); scene.add(a);
+      a.position.set(axis === 'x' ? 0 : pos, 0.05, axis === 'x' ? pos : 0); a.receiveShadow = true; scene.add(a);
       const off = ROAD_W / 2 + SIDE_W / 2;
       for (const s of [-1, 1]) {
         const sw = axis === 'x' ? len : SIDE_W;
         const sd = axis === 'x' ? SIDE_W : len;
         const s1 = new THREE.Mesh(new THREE.BoxGeometry(sw, 0.16, sd), sideMat);
         if (axis === 'x') s1.position.set(0, 0.08, pos + s * off); else s1.position.set(pos + s * off, 0.08, 0);
-        scene.add(s1);
+        s1.receiveShadow = true; scene.add(s1);
         const cw = axis === 'x' ? len : 0.4;
         const cd = axis === 'x' ? 0.4 : len;
         const c1 = new THREE.Mesh(new THREE.BoxGeometry(cw, 0.24, cd), curbMat);
@@ -319,7 +318,7 @@
         do { x = rand(-190, 190); z = rand(-190, 190); tries++; }
         while (tries < 20 && (onRoad(x, z) || inOcean(x, z) || Math.hypot(x, z) < 30));
         const p = new THREE.Mesh(new THREE.PlaneGeometry(size, size), mat);
-        p.rotation.x = -Math.PI / 2; p.position.set(x, 0.015, z); scene.add(p);
+        p.rotation.x = -Math.PI / 2; p.position.set(x, 0.015, z); p.receiveShadow = true; scene.add(p);
       }
     };
     place(parkMat, rand(44, 76));
@@ -358,11 +357,11 @@
     const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ map: tex }));
     body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
 
-    // 坡屋顶（出檐）
-    const rh = rand(2.4, 3.6);
+    // 坡屋顶（出檐，底面略大于墙体，避免屋顶过大盖住楼体）
+    const rh = rand(1.6, 2.3);
     const rbase = pick(CITY.roof);
     const roof = new THREE.Mesh(hipGeo, new THREE.MeshLambertMaterial({ map: roofTex(rbase) }));
-    roof.scale.set(w * 1.06, rh, d * 1.06); roof.position.y = h + rh / 2 - 0.25; g.add(roof);
+    roof.scale.set(w * 0.46, rh, d * 0.46); roof.position.y = h + rh / 2 - 0.1; g.add(roof);
 
     // 烟囱
     if (Math.random() < 0.6) {
@@ -658,6 +657,12 @@
     res.group.position.set(x, 0, z);
     if (rotY !== undefined) res.group.rotation.y = rotY;
     scene.add(res.group);
+    // blob 投影（柔和接触阴影，移动端稳定显示，不依赖 shadow map）
+    const blob = new THREE.Mesh(
+      new THREE.CircleGeometry(Math.max(res.radius * 1.5, 0.9), 24),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false })
+    );
+    blob.rotation.x = -Math.PI / 2; blob.position.y = 0.18; blob.renderOrder = -2; res.group.add(blob);
     preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind });
     placed.push({ x, z, r: res.radius * 0.55 });
   }
@@ -686,35 +691,34 @@
         ];
         for (const s of sides) {
           if (!s.street) continue;
-          let t = s.from + 4;
-          let cnt = 0;
-          while (t < s.to - 14 && cnt < 2) {
+          let t = s.from + 8;
+          while (t < s.to - 14) {
             const w = rand(11, 15);
-            if (t + w > s.to - 3) break;
+            if (t + w > s.to - 6) break;
             const c = t + w / 2;
-            const inset = rand(9, 11);
+            const inset = rand(9, 12);
             const x = s.axis === 'x' ? s.fixed + (s.fixed === x0 ? inset : -inset) : c;
             const z = s.axis === 'x' ? c : s.fixed + (s.fixed === z0 ? inset : -inset);
-            if (!inOcean(x, z) && Math.hypot(x, z) > 24) {
-              const res = buildRowHouse();
-              addPrey(res, x, z, 'row', s.rot);
-              cnt++;
+            if (!inOcean(x, z) && Math.hypot(x, z) > 12) {
+              addPrey(buildRowHouse(), x, z, 'row', s.rot);
             }
-            t += w + rand(0.4, 1.2);
+            t += w + rand(0.4, 1.4);
           }
         }
-        // 街区内部：公寓 / 塔楼 / 厂房
-        const inner = 1 + (Math.random() < 0.6 ? 1 : 0);
+        // 街区内部：公寓 / 塔楼 / 厂房，靠街区中心填充
+        const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+        const inner = 3 + (Math.random() < 0.6 ? 1 : 0);
         for (let i = 0; i < inner; i++) {
-          for (let a = 0; a < 14; a++) {
-            const x = rand(x0 + 16, x1 - 16), z = rand(z0 + 16, z1 - 16);
-            if (x0 + 16 > x1 - 16 || z0 + 16 > z1 - 16) break;
-            if (inOcean(x, z) || Math.hypot(x, z) < 24) continue;
-            let ok = true;
-            for (const q of placed) if (Math.hypot(x - q.x, z - q.z) < q.r + 12) { ok = false; break; }
-            if (!ok) continue;
+          for (let a = 0; a < 24; a++) {
+            const x = rand(cx - bw / 2 + 26, cx + bw / 2 - 26);
+            const z = rand(cz - bd / 2 + 26, cz + bd / 2 - 26);
+            if (cx - bw / 2 + 26 > cx + bw / 2 - 26 || cz - bd / 2 + 26 > cz + bd / 2 - 26) break;
+            if (inOcean(x, z) || Math.hypot(x, z) < 16) continue;
+            let good = true;
+            for (const q of placed) if (Math.hypot(x - q.x, z - q.z) < q.r + 12) { good = false; break; }
+            if (!good) continue;
             const r = Math.random();
-            const res = r < 0.45 ? buildAptTower() : (r < 0.85 ? buildGlassTower() : buildWarehouse());
+            const res = r < 0.5 ? buildAptTower() : (r < 0.85 ? buildGlassTower() : buildWarehouse());
             addPrey(res, x, z, 'tower', rand(0, 6.28));
             break;
           }
@@ -731,22 +735,22 @@
 
   // 沿人行道成排行道树（左右交错，避免过密）
   function placeStreetTrees() {
-    const step = 30;
+    const step = 22;
     for (const r of ROAD_Z) {
       let flip = 0;
-      for (let t = -CFG.world + 30; t < CFG.world - 30; t += step) {
+      for (let t = -CFG.world + 28; t < CFG.world - 28; t += step) {
         const s = (flip++ % 2 === 0) ? 1 : -1;
         const x = t, z = r + s * (ROAD_W / 2 + SIDE_W / 2);
-        if (inOcean(x, z) || Math.hypot(x, z) < 22) continue;
+        if (inOcean(x, z) || Math.hypot(x, z) < 12) continue;
         addPrey(buildTree(), x, z, 'tree');
       }
     }
     for (const r of ROAD_X) {
       let flip = 0;
-      for (let t = -CFG.world + 30; t < CFG.world - 30; t += step) {
+      for (let t = -CFG.world + 28; t < CFG.world - 28; t += step) {
         const s = (flip++ % 2 === 0) ? 1 : -1;
         const x = r + s * (ROAD_W / 2 + SIDE_W / 2), z = t;
-        if (inOcean(x, z) || Math.hypot(x, z) < 22) continue;
+        if (inOcean(x, z) || Math.hypot(x, z) < 12) continue;
         addPrey(buildTree(), x, z, 'tree');
       }
     }
@@ -755,50 +759,50 @@
   function placeSidewalkProps() {
     for (const r of ROAD_Z) {
       let flip = 0;
-      for (let t = -CFG.world + 40; t < CFG.world - 40; t += 56) {
+      for (let t = -CFG.world + 36; t < CFG.world - 36; t += 40) {
         const s = (flip++ % 2 === 0) ? 1 : -1;
         const z = r + s * (ROAD_W / 2 + SIDE_W / 2);
-        if (!inOcean(t, z) && Math.hypot(t, z) > 22) addPrey(buildStreetLamp(), t, z, 'lamp');
+        if (!inOcean(t, z) && Math.hypot(t, z) > 12) addPrey(buildStreetLamp(), t, z, 'lamp');
       }
     }
     for (const r of ROAD_X) {
       let flip = 0;
-      for (let t = -CFG.world + 40; t < CFG.world - 40; t += 56) {
+      for (let t = -CFG.world + 36; t < CFG.world - 36; t += 40) {
         const s = (flip++ % 2 === 0) ? 1 : -1;
         const x = r + s * (ROAD_W / 2 + SIDE_W / 2);
-        if (!inOcean(x, t) && Math.hypot(x, t) > 22) addPrey(buildStreetLamp(), x, t, 'lamp');
+        if (!inOcean(x, t) && Math.hypot(x, t) > 12) addPrey(buildStreetLamp(), x, t, 'lamp');
       }
     }
     // 公交站
     for (const r of ROAD_Z) {
-      for (let t = -CFG.world + 70; t < CFG.world - 70; t += 90) {
+      for (let t = -CFG.world + 60; t < CFG.world - 60; t += 80) {
         const z = r + (ROAD_W / 2 + SIDE_W / 2 + 1.6);
-        if (!inOcean(t, z) && Math.hypot(t, z) > 26) {
+        if (!inOcean(t, z) && Math.hypot(t, z) > 14) {
           const res = buildBusStop();
           addPrey(res, t, z, 'busstop', Math.PI);
         }
       }
     }
     // 垃圾桶 / 红绿灯
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 24; i++) {
       const axis = Math.random() < 0.5 ? 'x' : 'z';
       const roads = axis === 'x' ? ROAD_Z : ROAD_X;
       const r = pick(roads);
-      const along = rand(-CFG.world + 25, CFG.world - 25);
+      const along = rand(-CFG.world + 20, CFG.world - 20);
       const side = Math.random() < 0.5 ? -1 : 1;
       const off = ROAD_W / 2 + SIDE_W / 2;
       const x = axis === 'x' ? along : r + side * off;
       const z = axis === 'x' ? r + side * off : along;
-      if (inOcean(x, z) || Math.hypot(x, z) < 22) continue;
+      if (inOcean(x, z) || Math.hypot(x, z) < 12) continue;
       addPrey(Math.random() < 0.55 ? buildTrashBin() : buildTrafficLight(), x, z, 'prop');
     }
   }
   // 行人
   function placeWalker(n) {
     for (let i = 0; i < n; i++) {
-      for (let t = 0; t < 16; t++) {
+      for (let t = 0; t < 20; t++) {
         const x = rand(-185, 185), z = rand(-185, 185);
-        if (inOcean(x, z) || Math.hypot(x, z) < 22) continue;
+        if (inOcean(x, z) || onRoad(x, z) || Math.hypot(x, z) < 12) continue;
         const res = buildPerson();
         res.group.position.set(x, 0, z);
         scene.add(res.group);
@@ -806,7 +810,7 @@
           group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind: 'person',
           parts: res.parts, walk: { tx: rand(-180, 180), tz: rand(-180, 180), spd: rand(0, 3), phase: rand(0, 6.28) }
         });
-        return;
+        break;
       }
     }
   }
@@ -839,7 +843,7 @@
       while (made < n && guard < 300) {
         guard++;
         const x = rand(-190, 190), z = rand(-190, 190);
-        if (onRoad(x, z) || inOcean(x, z) || Math.hypot(x, z) < 22) continue;
+        if (onRoad(x, z) || inOcean(x, z) || Math.hypot(x, z) < 14) continue;
         let ok = true;
         for (const q of placed) if (Math.hypot(x - q.x, z - q.z) < q.r + 2.5) { ok = false; break; }
         if (!ok) continue;
@@ -865,24 +869,23 @@
     const boxEar = (w, h, d) => { const e = new THREE.Mesh(boxGeo, mat); e.scale.set(w, h, d); return e; };
     const sphEar = (r) => { const e = new THREE.Mesh(sphereGeo, mat); e.scale.set(r, 0.14, r); return e; };
     if (type === 'cat') {
-      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.7, () => coneEar(0.32, 0.7));
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.55, () => coneEar(0.22, 0.5));
     } else if (type === 'bunny') {
-      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.5, () => coneEar(0.2, 1.1));
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.45, () => coneEar(0.15, 0.78));
     } else if (type === 'bear') {
-      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.8, () => sphEar(0.3));
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.7, () => sphEar(0.24));
     } else if (type === 'dog') {
-      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.8, () => boxEar(0.28, 0.12, 0.55));
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.7, () => boxEar(0.24, 0.1, 0.46));
     } else {
-      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.6, () => coneEar(0.3, 0.8));
+      for (const s of [-1, 1]) addEar(Math.PI / 2 + s * 0.5, () => coneEar(0.2, 0.55));
     }
   }
   function createMouth(opts) {
     const g = new THREE.Group();
-    const holeMat = new THREE.MeshBasicMaterial({ color: 0x05050a, depthTest: false, depthWrite: false });
+    // 洞口遮罩（最上层纯黑，盖住下方地面/路面，避免穿透；depthTest:false + 高 renderOrder 压在透明路面标线之上）
+    const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthTest: false, depthWrite: false });
     const hole = new THREE.Mesh(holeGeo, holeMat);
-    hole.rotation.x = -Math.PI / 2; hole.position.y = 0.06; hole.renderOrder = 3; g.add(hole);
-    const depth = new THREE.Mesh(holeWallGeo, new THREE.MeshBasicMaterial({ color: 0x04040a, side: THREE.BackSide }));
-    depth.position.y = -0.44; g.add(depth);
+    hole.rotation.x = -Math.PI / 2; hole.position.y = 0.04; hole.renderOrder = 20; hole.scale.setScalar(1.06); g.add(hole);
     const lip = new THREE.Mesh(torusGeo, new THREE.MeshLambertMaterial({ color: opts.color }));
     lip.rotation.x = Math.PI / 2; lip.position.y = 0.1; lip.renderOrder = 1; g.add(lip);
     const tc = 18;
@@ -893,7 +896,6 @@
       t.position.set(Math.cos(a) * 0.9, 0.16, Math.sin(a) * 0.9);
       t.rotation.y = -a; g.add(t);
     }
-    addEars(g, opts.earType, opts.earColor);
     return g;
   }
   function makeMouth(opts) {
@@ -1125,6 +1127,8 @@
     }
   }
   function updateCamera() {
+    if (window.__freezeCam) return;
+    window.__cam = camera;
     const r = player ? player.r : CFG.startRadius;
     const off = new THREE.Vector3(0, 32 + r * 1.3, 24 + r * 1.6);
     const p = player ? player.group.position : new THREE.Vector3();
@@ -1133,6 +1137,7 @@
   }
   function loop() {
     requestAnimationFrame(loop);
+    if (typeof window !== 'undefined') { window.__dbgPreys = preys; window.__dbgScene = scene; }
     const dt = Math.min(0.05, clock.getDelta());
     if (state === 'playing') {
       timeLeft -= dt;
