@@ -44,7 +44,7 @@
   const input = { vx: 0, vz: 0 };
 
   let boxGeo, circleGeo, torusGeo, cylOpenGeo, coneGeo, cylGeo, sphereGeo, hipGeo;
-  let holeGeo, holeWallGeo, grassTex, dashTex, crossTex, texCache = {};
+  let holeGeo, holeWallGeo, grassTex, dashTex, crossTex, holeTex, texCache = {};
   let toothMat, windowTextures = [];
 
   const $ = (id) => document.getElementById(id);
@@ -65,18 +65,18 @@
   function makeGrassTex() {
     const s = 512;
     const c = cv(s, s); const x = c.getContext('2d');
-    x.fillStyle = '#6fb83f'; x.fillRect(0, 0, s, s);
+    x.fillStyle = '#93cf52'; x.fillRect(0, 0, s, s);
     // 大块明显深浅草色（不透明叠加，保证对比）
     for (let i = 0; i < 80; i++) {
       const dark = Math.random() < 0.5;
-      x.fillStyle = dark ? 'rgba(74,130,42,0.5)' : 'rgba(158,210,98,0.5)';
+      x.fillStyle = dark ? 'rgba(104,168,58,0.5)' : 'rgba(178,224,110,0.5)';
       x.beginPath(); x.ellipse(Math.random() * s, Math.random() * s, Math.random() * 120 + 50, Math.random() * 90 + 40, Math.random() * 3.14, 0, 6.28); x.fill();
     }
     // 草叶短笔触（深浅交错）
     for (let i = 0; i < 5200; i++) {
       const px = Math.random() * s, py = Math.random() * s;
       const dark = Math.random() < 0.5;
-      x.strokeStyle = dark ? 'rgba(54,118,42,0.55)' : 'rgba(150,210,90,0.55)';
+      x.strokeStyle = dark ? 'rgba(88,152,52,0.55)' : 'rgba(176,228,112,0.55)';
       x.lineWidth = 2.2;
       x.beginPath(); x.moveTo(px, py); x.lineTo(px + (Math.random() * 2 - 1), py - (Math.random() * 5 + 3)); x.stroke();
     }
@@ -140,7 +140,7 @@
   // 车道虚线（横向平铺）
   function makeDashTex() {
     const c = cv(32, 32); const x = c.getContext('2d');
-    x.fillStyle = '#ffe27a'; x.fillRect(0, 0, 18, 32);
+    x.fillStyle = '#ffffff'; x.fillRect(0, 0, 18, 32);
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     return t;
@@ -151,6 +151,19 @@
     x.fillStyle = '#f4f4f0'; x.fillRect(0, 0, 16, 32);
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    return t;
+  }
+  // 洞内漩涡：不透明 RGB 径向渐变（中心深海军蓝 -> 边缘亮蓝），参考 hole.io 蓝洞
+  function makeHoleTex() {
+    const s = 128;
+    const c = cv(s, s); const x = c.getContext('2d');
+    const g = x.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
+    g.addColorStop(0.0, '#071a4a');
+    g.addColorStop(0.55, '#12409c');
+    g.addColorStop(0.85, '#1e63d0');
+    g.addColorStop(1.0, '#2f86ec');
+    x.fillStyle = g; x.fillRect(0, 0, s, s);
+    const t = new THREE.CanvasTexture(c);
     return t;
   }
   function facadeTex(kind, base, frame, glass) {
@@ -181,8 +194,8 @@
 
     camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1200);
 
-    scene.add(new THREE.HemisphereLight(0xcfeaff, 0x74b355, 1.05));
-    const dir = new THREE.DirectionalLight(0xfff4e0, 0.9);
+    scene.add(new THREE.HemisphereLight(0xe8f4ff, 0x9cc46e, 0.78));
+    const dir = new THREE.DirectionalLight(0xfff4e0, 0.5);
     dir.position.set(80, 150, 60);
     scene.add(dir);
 
@@ -202,6 +215,7 @@
     crossTex = makeCrossTex();
 
     grassTex = makeGrassTex();
+    holeTex = makeHoleTex();
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(CFG.world * 2, CFG.world * 2),
       new THREE.MeshLambertMaterial({ map: grassTex })
@@ -233,11 +247,11 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
   }
 
-  // 柏油 + 人行道 + 路缘石 + 车道虚线
+  // 柏油 + 人行道 + 路缘石 + 车道虚线（马卡龙配色：浅紫路面，参考 hole.io 风格）
   function buildRoadNetwork() {
-    const roadMat = new THREE.MeshLambertMaterial({ color: 0x4a4a52 });
-    const sideMat = new THREE.MeshLambertMaterial({ color: 0x9a9aa2 });
-    const curbMat = new THREE.MeshLambertMaterial({ color: 0xc6c6c6 });
+    const roadMat = new THREE.MeshLambertMaterial({ color: 0xa893d6 });
+    const sideMat = new THREE.MeshLambertMaterial({ color: 0xcfc6e4 });
+    const curbMat = new THREE.MeshLambertMaterial({ color: 0xf0ecf8 });
     const len = CFG.world * 2;
     const addRoad = (axis, pos) => {
       const w = axis === 'x' ? len : ROAD_W;
@@ -276,6 +290,15 @@
         if (axis === 'x') t2.position.set(0, 0.12, pos + s * off2); else t2.position.set(pos + s * off2, 0.12, 0);
         scene.add(t2);
       }
+      // 道路两侧白色实线边线
+      for (const s of [-1, 1]) {
+        const e = new THREE.Mesh(new THREE.PlaneGeometry(axis === 'x' ? len : 0.5, axis === 'x' ? 0.5 : len),
+          new THREE.MeshBasicMaterial({ color: 0xffffff }));
+        e.rotation.x = -Math.PI / 2;
+        const offE = ROAD_W / 2 - 0.9;
+        if (axis === 'x') e.position.set(0, 0.14, pos + s * offE); else e.position.set(pos + s * offE, 0.14, 0);
+        scene.add(e);
+      }
     };
     for (const r of ROAD_Z) addRoad('x', r);
     for (const r of ROAD_X) addRoad('z', r);
@@ -310,8 +333,8 @@
 
   // 公园 / 广场色块
   function buildGroundDecor() {
-    const parkMat = new THREE.MeshLambertMaterial({ color: 0x5aa83d });
-    const plazaMat = new THREE.MeshLambertMaterial({ color: 0xbdb6a8 });
+    const parkMat = new THREE.MeshLambertMaterial({ color: 0x77c253 });
+    const plazaMat = new THREE.MeshLambertMaterial({ color: 0xe3dcef });
     const place = (mat, size) => {
       for (let i = 0; i < 5; i++) {
         let x, z, tries = 0;
@@ -460,7 +483,7 @@
       // 松树：主干 + 3 层圆锥
       const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x6b4326 }));
       trunk.scale.set(0.4, 2.0, 0.4); trunk.position.y = 1.0; g.add(trunk);
-      const pineMat = new THREE.MeshLambertMaterial({ color: pick(['#2f7d43', '#357f4a', '#287040']) });
+      const pineMat = new THREE.MeshLambertMaterial({ color: pick(['#2f9e58', '#37a862', '#289452']) });
       const tiers = [[2.6, 2.6, 3.4], [2.1, 2.3, 5.4], [1.5, 2.0, 7.2]];
       for (const [r, h, y] of tiers) {
         const cone = new THREE.Mesh(coneGeo, pineMat);
@@ -471,13 +494,14 @@
     // 阔叶树：主干 + 多个相交球团，云朵状
     const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x7a5230 }));
     trunk.scale.set(0.5, 2.8, 0.5); trunk.position.y = 1.4; g.add(trunk);
-    const base = pick(['#4e9b4a', '#5aa851', '#43893f', '#62b45a']);
+    const base = pick(['#3fae5f', '#57c46f', '#2fa257', '#6fd482']);
     const blobs = [
       [0, 5.4, 0, 2.6], [1.8, 5.0, 0.6, 1.9], [-1.8, 5.0, -0.4, 1.9],
       [0.4, 6.6, -0.6, 1.8], [-0.5, 4.6, 1.6, 1.7], [1.2, 6.2, 1.2, 1.4]
     ];
     for (const [bx, by, bz, br] of blobs) {
-      const shade = Math.random() < 0.4 ? '#3f8a3c' : base;
+      // 双色球冠：深绿主体随机穿插亮绿高光球，接近参考的明快双色树
+      const shade = Math.random() < 0.45 ? '#8ce08c' : base;
       const b = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: shade }));
       b.scale.set(br, br * 1.05, br); b.position.set(bx, by, bz); g.add(b);
     }
@@ -659,8 +683,8 @@
     scene.add(res.group);
     // blob 投影（柔和接触阴影，移动端稳定显示，不依赖 shadow map）
     const blob = new THREE.Mesh(
-      new THREE.CircleGeometry(Math.max(res.radius * 1.5, 0.9), 24),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, depthWrite: false })
+      new THREE.CircleGeometry(Math.max(res.radius * 1.25, 0.8), 24),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.34, depthWrite: false })
     );
     blob.rotation.x = -Math.PI / 2; blob.position.y = 0.18; blob.renderOrder = -2; res.group.add(blob);
     preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind });
@@ -677,6 +701,7 @@
   }
   function spawnCity() {
     placed.length = 0;
+    placeFountains();
     const xs = axisIntervals(ROAD_X), zs = axisIntervals(ROAD_Z);
     for (const [x0, x1] of xs) {
       for (const [z0, z1] of zs) {
@@ -700,7 +725,9 @@
             const x = s.axis === 'x' ? s.fixed + (s.fixed === x0 ? inset : -inset) : c;
             const z = s.axis === 'x' ? c : s.fixed + (s.fixed === z0 ? inset : -inset);
             if (!inOcean(x, z) && Math.hypot(x, z) > 12) {
-              addPrey(buildRowHouse(), x, z, 'row', s.rot);
+              let clear = true;
+              for (const q of placed) if (Math.hypot(x - q.x, z - q.z) < q.r + 7) { clear = false; break; }
+              if (clear) addPrey(buildRowHouse(), x, z, 'row', s.rot);
             }
             t += w + rand(0.4, 1.4);
           }
@@ -731,6 +758,39 @@
     placeWalker(16);
     placeTraffic(12);
     placeScatter();
+  }
+
+  // 喷泉地标：水池 + 中心柱 + 双层水盘 + 水柱（参考画面中央广场的喷泉）
+  function buildFountain() {
+    const g = new THREE.Group();
+    const stone = new THREE.MeshLambertMaterial({ color: 0xefe9f6 });
+    const pool = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x6fc9ee }));
+    pool.scale.set(5, 0.7, 5); pool.position.y = 0.35; g.add(pool);
+    const rim = new THREE.Mesh(cylGeo, stone);
+    rim.scale.set(5.5, 1.0, 5.5); rim.position.y = 0.5; g.add(rim);
+    const col = new THREE.Mesh(cylGeo, stone);
+    col.scale.set(0.9, 2.2, 0.9); col.position.y = 1.7; g.add(col);
+    const bowl = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x9fdcf5 }));
+    bowl.scale.set(2.3, 0.5, 2.3); bowl.position.y = 2.95; g.add(bowl);
+    const jet = new THREE.Mesh(cylGeo, new THREE.MeshBasicMaterial({ color: 0xd6f1ff, transparent: true, opacity: 0.75 }));
+    jet.scale.set(0.42, 3.2, 0.42); jet.position.y = 4.6; g.add(jet);
+    const top = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+    top.scale.setScalar(0.55); top.position.y = 6.3; g.add(top);
+    return { group: g, radius: 5.5, mass: 70 };
+  }
+  // 在开阔草地上放 3 座喷泉（避开道路/海洋/出生区/已有物体）
+  function placeFountains() {
+    let made = 0, guard = 0;
+    while (made < 3 && guard < 200) {
+      guard++;
+      const x = rand(-170, 170), z = rand(-170, 170);
+      if (onRoad(x, z) || inOcean(x, z) || Math.hypot(x, z) < 24) continue;
+      let ok = true;
+      for (const q of placed) if (Math.hypot(x - q.x, z - q.z) < q.r + 16) { ok = false; break; }
+      if (!ok) continue;
+      addPrey(buildFountain(), x, z, 'fountain');
+      made++;
+    }
   }
 
   // 沿人行道成排行道树（左右交错，避免过密）
@@ -882,8 +942,12 @@
   }
   function createMouth(opts) {
     const g = new THREE.Group();
-    // 洞口遮罩（最上层纯黑，盖住下方地面/路面，避免穿透；depthTest:false + 高 renderOrder 压在透明路面标线之上）
-    const holeMat = new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, depthTest: false, depthWrite: false });
+    // 外圈淡蓝光晕（先画，被唇环压住内缘）
+    const glow = new THREE.Mesh(new THREE.CircleGeometry(1.45, 40),
+      new THREE.MeshBasicMaterial({ color: 0x7fb8ff, transparent: true, opacity: 0.35, depthWrite: false }));
+    glow.rotation.x = -Math.PI / 2; glow.position.y = 0.06; glow.renderOrder = 0.5; g.add(glow);
+    // 洞口遮罩（蓝色漩涡贴图，最上层，盖住下方地面/路面；depthTest:false + 高 renderOrder 压在透明路面标线之上）
+    const holeMat = new THREE.MeshBasicMaterial({ map: holeTex, transparent: true, depthTest: false, depthWrite: false });
     const hole = new THREE.Mesh(holeGeo, holeMat);
     hole.rotation.x = -Math.PI / 2; hole.position.y = 0.04; hole.renderOrder = 20; hole.scale.setScalar(1.06); g.add(hole);
     const lip = new THREE.Mesh(torusGeo, new THREE.MeshLambertMaterial({ color: opts.color }));
@@ -910,10 +974,10 @@
     return m;
   }
   function spawnMouths() {
-    player = makeMouth({ isPlayer: true, color: 0xff5a8a, earColor: 0xff86ad, earType: 'cat', r: CFG.startRadius, x: 0, z: 0 });
+    player = makeMouth({ isPlayer: true, color: 0x38b6ff, earColor: 0xff86ad, earType: 'cat', r: CFG.startRadius, x: 0, z: 0 });
     mouths.push(player);
     const aiDefs = [
-      { color: 0x4aa3ff, earColor: 0x2f7fd6, earType: 'dog' },
+      { color: 0xff6b9a, earColor: 0x2f7fd6, earType: 'dog' },
       { color: 0x57d98a, earColor: 0xffffff, earType: 'bunny' },
       { color: 0xffc24a, earColor: 0xc98a2a, earType: 'bear' },
       { color: 0xb06bff, earColor: 0x7d3fc0, earType: 'fox' }
@@ -1130,7 +1194,7 @@
     if (window.__freezeCam) return;
     window.__cam = camera;
     const r = player ? player.r : CFG.startRadius;
-    const off = new THREE.Vector3(0, 32 + r * 1.3, 24 + r * 1.6);
+    const off = new THREE.Vector3(0, 34 + r * 1.45, 18 + r * 1.15);
     const p = player ? player.group.position : new THREE.Vector3();
     camera.position.set(p.x + off.x, off.y, p.z + off.z);
     camera.lookAt(p.x, 0, p.z);
