@@ -1,9 +1,12 @@
-name: Build APK
+name: Build Release APK
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write   # 用于创建/更新 GitHub Release
 
 jobs:
   build:
@@ -25,14 +28,37 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Build debug APK
+      - name: Generate signing keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore release.keystore.jks \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias bigmouse \
+            -dname "CN=BigMouse, OU=Game, O=BigMouse, L=CN, ST=CN, C=CN" \
+            -storepass android -keypass android
+
+      - name: Build signed release APK
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: '8.9'
-          arguments: ':app:assembleDebug'
+          arguments: ':app:assembleRelease'
+        env:
+          KEYSTORE_PATH: ${{ github.workspace }}/release.keystore.jks
+          KEYSTORE_PASS: android
+          KEY_ALIAS: bigmouse
+          KEY_PASS: android
 
-      - name: Upload APK
+      - name: Upload APK to GitHub Release (公开下载)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0
+          name: 大嘴巴 v1.0.0
+          files: app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload APK artifact (备用)
         uses: actions/upload-artifact@v4
         with:
-          name: bigmouse-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          name: bigmouse-release-apk
+          path: app/build/outputs/apk/release/*.apk
