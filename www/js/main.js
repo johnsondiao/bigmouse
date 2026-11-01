@@ -44,7 +44,7 @@
   const input = { vx: 0, vz: 0 };
 
   let boxGeo, circleGeo, torusGeo, cylOpenGeo, coneGeo, cylGeo, sphereGeo, hipGeo;
-  let holeGeo, holeWallGeo, grassTex, dashTex, crossTex, holeTex, texCache = {};
+  let holeGeo, holeWallGeo, grassTex, dashTex, crossTex, holeTex, umbrellaTex, texCache = {};
   let toothMat, windowTextures = [];
 
   const $ = (id) => document.getElementById(id);
@@ -52,7 +52,7 @@
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const inOcean = (x, z) => (x > 100 && z > 100);
-  let stickBase = null, stickKnob = null, playerTag = null, playerTagFill = null, playerTagText = null;
+  let stickBase = null, stickKnob = null, playerTag = null, playerTagBall = null, playerTagNum = null, playerTagText = null;
   const aiTags = [];
   const ray = new THREE.Ray(), tmpV = new THREE.Vector3(), tmpV2 = new THREE.Vector3(), tmpProj = new THREE.Vector3();
   // 动态 UI：虚拟摇杆（参考录屏的基座圈+方向球）与 LVL 等级标签
@@ -67,33 +67,41 @@
       };
       stickBase = mk('position:fixed;left:0;top:0;width:120px;height:120px;margin:-60px 0 0 -60px;border-radius:50%;border:2px solid rgba(255,255,255,0.8);background:rgba(255,255,255,0.15);pointer-events:none;z-index:30;display:none;');
       stickKnob = mk('position:fixed;left:0;top:0;width:46px;height:46px;margin:-23px 0 0 -23px;border-radius:50%;background:rgba(255,255,255,0.95);box-shadow:0 2px 8px rgba(0,0,0,0.3);pointer-events:none;z-index:31;display:none;');
-      // 玩家等级标签：LVL 文本 + 黑底蓝条进度
+      // 玩家等级标签：LVL 文本 + 黑底计数条（蓝色圆球 + n/10，参考录屏同款）
       playerTag = mk('position:fixed;left:-999px;top:-999px;transform:translate(-50%,-100%);pointer-events:none;z-index:25;text-align:center;');
       playerTagText = document.createElement('div');
       playerTagText.style.cssText = 'font-weight:700;font-size:15px;color:#37c8ff;text-shadow:0 1px 3px rgba(0,0,0,0.6);letter-spacing:1px;';
       playerTagText.textContent = 'LVL 1';
       playerTag.appendChild(playerTagText);
       const bar = document.createElement('div');
-      bar.style.cssText = 'width:74px;height:13px;margin:2px auto 0;background:#22242e;border:1px solid rgba(255,255,255,0.3);border-radius:7px;overflow:hidden;';
-      playerTagFill = document.createElement('div');
-      playerTagFill.style.cssText = 'height:100%;width:0%;background:#37c8ff;border-radius:7px;';
-      bar.appendChild(playerTagFill);
+      bar.style.cssText = 'position:relative;width:96px;height:20px;margin:2px auto 0;background:#22242e;border:1.5px solid rgba(255,255,255,0.35);border-radius:11px;overflow:hidden;';
+      playerTagBall = document.createElement('div');
+      playerTagBall.style.cssText = 'position:absolute;top:2.5px;left:2px;width:12px;height:12px;border-radius:50%;background:#37c8ff;';
+      bar.appendChild(playerTagBall);
+      playerTagNum = document.createElement('div');
+      playerTagNum.style.cssText = 'position:absolute;left:0;right:0;top:0;line-height:17px;font-size:11px;font-weight:700;color:#fff;text-align:center;';
+      playerTagNum.textContent = '0/10';
+      bar.appendChild(playerTagNum);
       playerTag.appendChild(bar);
-      // AI 标签：彩色 LVL 文本
+      // AI 标签：彩色三角箭头 + LVL 文本
       for (let i = 0; i < CFG.aiCount; i++) {
-        const t = mk('position:fixed;left:-999px;top:-999px;transform:translate(-50%,-100%);pointer-events:none;z-index:24;font-weight:700;font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,0.65);');
-        t.textContent = 'LVL 1';
+        const t = mk('position:fixed;left:-999px;top:-999px;transform:translate(-50%,-100%);pointer-events:none;z-index:24;text-align:center;');
+        const tri = document.createElement('div');
+        tri.style.cssText = 'width:0;height:0;margin:0 auto;border-left:6px solid transparent;border-right:6px solid transparent;border-top:9px solid #fff;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));';
+        t.appendChild(tri);
+        const tx = document.createElement('div');
+        tx.style.cssText = 'font-weight:700;font-size:12px;text-shadow:0 1px 3px rgba(0,0,0,0.65);';
+        tx.textContent = 'LVL 1';
+        t.appendChild(tx);
+        t._tri = tri; t._tx = tx;
         aiTags.push(t);
       }
     } catch (e) { stickBase = stickKnob = null; }
   }
-  // 等级分档：r<8 LVL1 / <16 LVL2 / <26 LVL3 / <40 LVL4 / 其余 LVL5
-  function lvlOf(r) {
-    const bands = [8, 16, 26, 40, 1e9];
-    let i = 0;
-    while (r >= bands[i]) i++;
-    const lo = i === 0 ? CFG.startRadius : bands[i - 1];
-    return { lvl: i + 1, prog: clamp((r - lo) / (bands[i] - lo), 0, 1) };
+  // 等级按吞掉数计：每 10 个升 1 级（参考的 n/10 计数条）
+  function lvlOf(count) {
+    const c = Math.max(0, count | 0);
+    return { lvl: Math.min(5, 1 + Math.floor(c / 10)), prog: (c % 10) / 10, label: (c % 10) + '/10' };
   }
   // 每帧把洞上方锚点投影到屏幕，更新 LVL 标签位置
   function updateLabels() {
@@ -109,9 +117,10 @@
       playerTag.style.display = 'block';
       playerTag.style.left = ((tmpProj.x * 0.5 + 0.5) * window.innerWidth) + 'px';
       playerTag.style.top = ((-tmpProj.y * 0.5 + 0.5) * window.innerHeight - 8) + 'px';
-      const L = lvlOf(player.r);
+      const L = lvlOf(player.eatCount || 0);
       playerTagText.textContent = 'LVL ' + L.lvl;
-      playerTagFill.style.width = Math.round(L.prog * 100) + '%';
+      playerTagNum.textContent = L.label;
+      playerTagBall.style.left = (2 + L.prog * 78) + 'px';
     } else playerTag.style.display = 'none';
     let i = 0;
     for (const m of mouths) {
@@ -122,8 +131,10 @@
         t.style.display = 'block';
         t.style.left = ((tmpProj.x * 0.5 + 0.5) * window.innerWidth) + 'px';
         t.style.top = ((-tmpProj.y * 0.5 + 0.5) * window.innerHeight - 6) + 'px';
-        t.textContent = 'LVL ' + lvlOf(m.r).lvl;
-        t.style.color = '#' + (m.color || 0xffffff).toString(16).padStart(6, '0');
+        const col = '#' + (m.color || 0xffffff).toString(16).padStart(6, '0');
+        t._tx.textContent = 'LVL ' + lvlOf(m.eatCount || 0).lvl;
+        t._tx.style.color = col;
+        t._tri.style.borderTopColor = col;
       } else t.style.display = 'none';
     }
   }
@@ -263,6 +274,17 @@
     const t = new THREE.CanvasTexture(c);
     return t;
   }
+  // 遮阳伞条纹（红黄放射）
+  function makeUmbrellaTex() {
+    const c = cv(64, 64); const x = c.getContext('2d');
+    const cols = ['#e05a4f', '#f2c53d'];
+    for (let i = 0; i < 8; i++) {
+      x.fillStyle = cols[i % 2];
+      x.beginPath(); x.moveTo(32, 32); x.arc(32, 32, 32, i / 8 * 6.28 - 1.57, (i + 1) / 8 * 6.28 - 1.57); x.closePath(); x.fill();
+    }
+    const t = new THREE.CanvasTexture(c);
+    return t;
+  }
   function facadeTex(kind, base, frame, glass) {
     const key = kind + '|' + base + '|' + frame;
     if (!texCache[key]) {
@@ -314,6 +336,7 @@
     grassTex = makeGrassTex();
     grassTex.repeat.set(18, 18);   // 地面扩到 1200x1200 后按比例加密，保持草皮密度
     holeTex = makeHoleTex();
+    umbrellaTex = makeUmbrellaTex();
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(CFG.world * 6, CFG.world * 6),
       new THREE.MeshLambertMaterial({ map: grassTex })
@@ -334,6 +357,7 @@
     ocean.rotation.x = -Math.PI / 2;
     ocean.position.set(CFG.world - 50, 0.04, CFG.world - 50);
     scene.add(ocean);
+    buildSeaRail();
 
     clock = new THREE.Clock();
     window.addEventListener('resize', onResize);
@@ -427,6 +451,28 @@
       }
     }
     void mat;
+  }
+
+  // 海堤白色栏杆（沿水池两条岸边，参考同款白石栏）
+  function buildSeaRail() {
+    const railMat = new THREE.MeshLambertMaterial({ color: 0xf0ebf5 });
+    const shore = 104;
+    for (const axis of ['x', 'z']) {
+      for (let t = 107; t < 194; t += 4.5) {
+        const post = new THREE.Mesh(boxGeo, railMat);
+        post.scale.set(0.55, 1.5, 0.55);
+        if (axis === 'x') post.position.set(t, 0.75, shore); else post.position.set(shore, 0.75, t);
+        scene.add(post);
+      }
+      const beam = new THREE.Mesh(boxGeo, railMat);
+      if (axis === 'x') { beam.scale.set(90, 0.4, 0.4); beam.position.set(150, 1.2, shore); }
+      else { beam.scale.set(0.4, 0.4, 90); beam.position.set(shore, 1.2, 150); }
+      scene.add(beam);
+      const beam2 = new THREE.Mesh(boxGeo, railMat);
+      if (axis === 'x') { beam2.scale.set(90, 0.3, 0.3); beam2.position.set(150, 0.55, shore); }
+      else { beam2.scale.set(0.3, 0.3, 90); beam2.position.set(shore, 0.55, 150); }
+      scene.add(beam2);
+    }
   }
 
   // 公园 / 广场色块
@@ -592,7 +638,7 @@
     // 阔叶树：主干 + 多个相交球团，云朵状
     const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x7a5230 }));
     trunk.scale.set(0.5, 2.8, 0.5); trunk.position.y = 1.4; g.add(trunk);
-    const base = pick(['#3fae5f', '#57c46f', '#2fa257', '#6fd482']);
+    const base = pick(['#3fae5f', '#57c46f', '#5fc9a8', '#8fdcc0']);
     const blobs = [
       [0, 5.4, 0, 2.6], [1.8, 5.0, 0.6, 1.9], [-1.8, 5.0, -0.4, 1.9],
       [0.4, 6.6, -0.6, 1.8], [-0.5, 4.6, 1.6, 1.7], [1.2, 6.2, 1.2, 1.4]
@@ -754,7 +800,11 @@
     body.scale.set(0.8, h, 0.5); body.position.y = lg + h / 2; g.add(body);
     const head = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: skin }));
     head.scale.set(0.6, 0.6, 0.6); head.position.y = lg + h + 0.3; g.add(head);
-    if (Math.random() < 0.35) {
+    // 黑发（大多数）或帽子（少数），参考里行人多为黑发
+    if (Math.random() < 0.6) {
+      const hair = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick(['#222222', '#3d2b1f', '#151515']) }));
+      hair.scale.set(0.64, 0.2, 0.64); hair.position.y = lg + h + 0.52; g.add(hair);
+    } else if (Math.random() < 0.4) {
       const hat = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick(['#2a2a2a', '#8b5a2b', '#c0392b', '#2e86de']) }));
       hat.scale.set(0.66, 0.22, 0.66); hat.position.y = lg + h + 0.6; g.add(hat);
     }
@@ -997,9 +1047,29 @@
       });
     }
   }
+  // 露天咖啡座：红黄条纹遮阳伞 + 座椅 + 绿篱（参考街边装饰）
+  function buildCafe() {
+    const g = new THREE.Group();
+    const pole = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0xd8d2c8 }));
+    pole.scale.set(0.12, 2.6, 0.12); pole.position.y = 1.3; g.add(pole);
+    const top = new THREE.Mesh(coneGeo, new THREE.MeshLambertMaterial({ map: umbrellaTex }));
+    top.scale.set(1.9, 0.85, 1.9); top.position.y = 2.85; g.add(top);
+    const chairMat = new THREE.MeshLambertMaterial({ color: 0xc4503f });
+    for (const [cx, cz, ry] of [[1.4, 0.3, 0.6], [-1.3, -0.4, -2.3]]) {
+      const seat = new THREE.Mesh(boxGeo, chairMat);
+      seat.scale.set(0.7, 0.45, 0.7); seat.position.set(cx, 0.5, cz); seat.rotation.y = ry; g.add(seat);
+      const back = new THREE.Mesh(boxGeo, chairMat);
+      back.scale.set(0.7, 0.85, 0.14);
+      back.position.set(cx + Math.sin(ry) * 0.32, 1.05, cz + Math.cos(ry) * 0.32);
+      back.rotation.y = ry; g.add(back);
+    }
+    const hedge = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x4f9e4c }));
+    hedge.scale.set(3.6, 0.8, 0.7); hedge.position.set(0, 0.4, -1.2); g.add(hedge);
+    return { group: g, radius: 2.2, mass: 5 };
+  }
   // 草坪小道具
   function placeScatter() {
-    const kinds = [['bush', buildBush, 14], ['flower', buildFlower, 18], ['bench', buildBench, 5], ['hydrant', buildHydrant, 4]];
+    const kinds = [['bush', buildBush, 14], ['flower', buildFlower, 18], ['bench', buildBench, 5], ['hydrant', buildHydrant, 4], ['cafe', buildCafe, 7]];
     for (const [kind, fn, n] of kinds) {
       let made = 0, guard = 0;
       while (made < n && guard < 300) {
@@ -1165,6 +1235,8 @@
       const dist = Math.hypot(dx, dz);
       if (dist < m.r - p.radius * 0.5 && p.radius < m.r * 0.9) {
         p.eaten = true; p.eater = m;
+        p.fallT = 0;
+        m.eatCount = (m.eatCount || 0) + 1;
       }
     }
   }
@@ -1210,10 +1282,17 @@
   function updatePrey(p, dt) {
     if (!p.eaten) return;
     const e = p.eater;
-    p.group.position.x += (e.group.position.x - p.group.position.x) * Math.min(1, dt * 6);
-    p.group.position.z += (e.group.position.z - p.group.position.z) * Math.min(1, dt * 6);
-    p.group.position.y -= dt * (e.r * 1.6 + 5);
-    const s = Math.max(0.001, p.group.scale.x - dt * 1.7);
+    p.fallT = (p.fallT || 0) + dt;
+    // 吸入洞心（先加速吸附）
+    const k = Math.min(1, dt * (6 + p.fallT * 14));
+    p.group.position.x += (e.group.position.x - p.group.position.x) * k;
+    p.group.position.z += (e.group.position.z - p.group.position.z) * k;
+    // 先轻轻弹起 0.12s 再加速坠入洞中
+    const hop = p.fallT < 0.12 ? Math.sin(p.fallT / 0.12 * Math.PI) * e.r * 0.35 : 0;
+    p.group.position.y = hop - Math.max(0, p.fallT - 0.1) * (e.r * 2.2 + 6);
+    // 边转边缩小（参考的螺旋吸入感）
+    p.group.rotation.y += dt * 7;
+    const s = Math.max(0.001, p.group.scale.x - dt * 1.9);
     p.group.scale.setScalar(s);
     if (s <= 0.06 || p.group.position.y < -e.r) {
       scene.remove(p.group);
