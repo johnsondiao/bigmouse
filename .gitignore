@@ -1,0 +1,17 @@
+# Android / Gradle 构建产物
+*.apk
+*.aab
+*.keystore
+*.jks
+build/
+.gradle/
+local.properties
+
+# Gradle 发行包（若误放入仓库）
+gradle-*/
+gradle-*.zip
+
+# OS / 编辑器
+.DS_Store
+*.iml
+.idea/

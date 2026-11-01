@@ -14,19 +14,11 @@ android {
         versionName "1.0.0"
     }
 
-    // 签名配置：CI 里生成 keystore 并通过环境变量传入
-    signingConfigs {
-        release {
-            storeFile file(System.getenv('KEYSTORE_PATH') ?: 'release.keystore.jks')
-            storePassword System.getenv('KEYSTORE_PASS') ?: 'android'
-            keyAlias System.getenv('KEY_ALIAS') ?: 'bigmouse'
-            keyPassword System.getenv('KEY_PASS') ?: 'android'
-        }
-    }
-
+    // 复用 AGP 自带的 debug 签名来签 release，保证 CI 产出的 APK 可直接安装，
+    // 无需 keytool / 环境变量（与 shurufa 项目的 proven 做法一致）。
     buildTypes {
         release {
-            signingConfig signingConfigs.release
+            signingConfig signingConfigs.debug
             minifyEnabled false
         }
     }

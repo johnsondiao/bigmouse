@@ -20,48 +20,23 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # 直接由 action 安装 Gradle（无需仓库内提交 gradle wrapper），
+      # 与 shurufa 项目的 proven 配置一致。
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      # ubuntu-latest 镜像已预装 Android SDK（ANDROID_HOME），
+      # 因此无需再手动安装 SDK / build-tools / platform。
       - name: Copy web assets into Android assets
         run: |
           mkdir -p app/src/main/assets
           cp -r www/* app/src/main/assets/
 
-      - name: Set up Android SDK (manual, reliable)
-        run: |
-          SDK_ROOT=$HOME/android-sdk
-          mkdir -p "$SDK_ROOT/cmdline-tools"
-          curl -sS -o cmdtools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          unzip -q cmdtools.zip -d "$SDK_ROOT/cmdline-tools"
-          mv "$SDK_ROOT/cmdline-tools/cmdline-tools" "$SDK_ROOT/cmdline-tools/latest"
-          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
-          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          yes | sdkmanager --sdk_root="$SDK_ROOT" --licenses
-          sdkmanager --sdk_root="$SDK_ROOT" "platform-tools" "platforms;android-34" "build-tools;34.0.0"
-
-      - name: Set up Gradle wrapper
-        run: |
-          curl -sS -o gradle.zip https://services.gradle.org/distributions/gradle-8.9-bin.zip
-          unzip -q gradle.zip
-          mv gradle-8.9 gradle-dist
-          gradle-dist/bin/gradle wrapper --gradle-version 8.9
-
-      - name: Generate signing keystore
-        run: |
-          keytool -genkeypair -v \
-            -keystore release.keystore.jks \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias bigmouse \
-            -dname "CN=BigMouse, OU=Game, O=BigMouse, L=CN, ST=CN, C=CN" \
-            -storepass android -keypass android
-
-      - name: Build signed release APK
-        env:
-          KEYSTORE_PATH: ${{ github.workspace }}/release.keystore.jks
-          KEYSTORE_PASS: android
-          KEY_ALIAS: bigmouse
-          KEY_PASS: android
-        run: |
-          chmod +x gradlew
-          ./gradlew --no-daemon :app:assembleRelease
+      # release 用 AGP 自带的 debug 签名，产出可直接安装的 APK
+      - name: Build Release APK
+        run: gradle assembleRelease --no-daemon
 
       - name: Upload APK to GitHub Release (公开下载)
         uses: softprops/action-gh-release@v2
