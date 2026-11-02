@@ -204,18 +204,22 @@
     const W = 32, H = 64;
     const c = cv(W, H); const x = c.getContext('2d');
     x.fillStyle = base; x.fillRect(0, 0, W, H);
+    // 白色竖向壁柱（参考立面两侧白柱，平铺后等距分隔）
+    x.fillStyle = 'rgba(255,255,255,0.9)';
+    x.fillRect(0, 0, 3, H); x.fillRect(W - 3, 0, 3, H);
     if (brick) {
-      x.strokeStyle = 'rgba(0,0,0,0.13)'; x.lineWidth = 1;
+      x.strokeStyle = 'rgba(0,0,0,0.12)'; x.lineWidth = 1;
       for (let y = 0; y < H; y += 8) { x.beginPath(); x.moveTo(0, y + 0.5); x.lineTo(W, y + 0.5); x.stroke(); }
       for (let y = 0; y < H; y += 8) {
         const off = ((y / 8) % 2) * 8;
         for (let px = off; px < W; px += 16) { x.beginPath(); x.moveTo(px + 0.5, y); x.lineTo(px + 0.5, y + 8); x.stroke(); }
       }
     }
-    x.fillStyle = frame; x.fillRect(6, 9, 20, 42);      // 窗框
-    x.fillStyle = '#6d86b0'; x.fillRect(9, 12, 14, 36);       // 玻璃（提亮，避免像黑洞）
-    x.fillStyle = 'rgba(255,255,255,0.20)'; x.fillRect(9, 12, 14, 8);
-    x.fillStyle = frame; x.fillRect(5, 48, 22, 4);       // 窗台
+    // 大窗：白框 + 天蓝玻璃 + 白窗台（参考临街商铺同款）
+    x.fillStyle = '#ffffff'; x.fillRect(5, 8, 22, 42);      // 窗框
+    x.fillStyle = glass; x.fillRect(8, 11, 16, 36);        // 天蓝玻璃
+    x.fillStyle = 'rgba(255,255,255,0.4)'; x.fillRect(8, 11, 16, 6);
+    x.fillStyle = '#ffffff'; x.fillRect(3, 47, 26, 5);      // 白窗台
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping;
     t.anisotropy = 4;
@@ -516,42 +520,41 @@
     const g = new THREE.Group();
     const w = rand(9, 13), d = rand(10, 14);
     const floors = 2 + (Math.random() < 0.45 ? 1 : 0);
-    const h = floors * 3.3;
-    const isBrick = Math.random() < 0.55;
-    const base = pick(isBrick ? CITY.brick : CITY.stucco);
-    const frame = pick(CITY.frame);
+    const h = floors * 3.2;
+    // 墙体：珊瑚粉/米黄/浅蓝紫（参考临街商铺色）
+    const base = pick(['#e89486', '#e8d6b4', '#b6a6d6', '#d6c2c4', '#a4b6d8']);
     const cols = Math.max(2, Math.round(w / 3.3));
-    const tex = facadeTex(isBrick ? 'brick' : 'stucco', base, frame, '#33405c');
+    const tex = facadeTex('stucco', base, '#ffffff', '#4a9ede', false);
     tex.repeat.set(cols, floors);
     const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ map: tex }));
     body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
-
-    // 坡屋顶（出檐，底面略大于墙体，避免屋顶过大盖住楼体）
-    const rh = rand(1.6, 2.3);
-    const rbase = pick(CITY.roof);
-    const roof = new THREE.Mesh(hipGeo, new THREE.MeshLambertMaterial({ map: roofTex(rbase) }));
-    roof.scale.set(w * 0.46, rh, d * 0.46); roof.position.y = h + rh / 2 - 0.1; g.add(roof);
-
-    // 烟囱
-    if (Math.random() < 0.6) {
-      const ch = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x8d5b46 }));
-      ch.scale.set(1.1, rand(2.4, 3.8), 1.1);
-      ch.position.set(rand(-w * 0.25, w * 0.25), h + rh * 0.6, rand(-d * 0.2, d * 0.2));
-      g.add(ch);
+    // 平顶 + 女儿墙（参考临街楼多为平顶）
+    const roof = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xd8cbb8 }));
+    roof.scale.set(w + 0.7, 0.6, d + 0.7); roof.position.y = h + 0.3; g.add(roof);
+    // 条纹雨篷（白+彩相间，向下斜伸，参考同款波浪边）
+    if (Math.random() < 0.7) {
+      const c1 = pick(['#4a7fd0', '#d05a4a', '#e0a040', '#4a9e6a']);
+      const awning = new THREE.Group();
+      for (let i = 0; i < 6; i++) {
+        const strip = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: i % 2 === 0 ? 0xffffff : c1 }));
+        strip.scale.set(w * 0.16, 0.14, 1.9);
+        strip.position.set(-w * 0.4 + i * w * 0.16, 0, 0);
+        strip.rotation.x = -0.55;
+        awning.add(strip);
+      }
+      awning.position.set(0, 3.05, d / 2 + 0.5);
+      g.add(awning);
     }
-    // 底层店面
-    if (Math.random() < 0.5) {
-      const awn = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick(CITY.awn) }));
-      awn.scale.set(w * 0.86, 0.5, 1.9); awn.position.set(0, 2.7, d / 2 + 0.9); g.add(awn);
-      const sign = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x2f3a4a }));
-      sign.scale.set(w * 0.6, 0.9, 0.3); sign.position.set(0, 3.7, d / 2 + 0.15); g.add(sign);
-      const band = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x27364f }));
-      band.scale.set(w * 0.82, 2.3, 0.22); band.position.set(0, 1.25, d / 2 + 0.06); g.add(band);
-    }
-    // 阳台
-    if (Math.random() < 0.45 && floors >= 3) {
-      const b = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xdcd6c8 }));
-      b.scale.set(w * 0.5, 0.22, 1.4); b.position.set(rand(-w * 0.15, w * 0.15), h * 0.52, d / 2 + 0.65); g.add(b);
+    // 门 + 门前台阶 + 两侧绿植盆栽（参考门口细节）
+    const door = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x6b4a2e }));
+    door.scale.set(1.4, 2.0, 0.18); door.position.set(0, 1.0, d / 2 + 0.04); g.add(door);
+    const step = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xc2c4d0 }));
+    step.scale.set(2.6, 0.45, 1.0); step.position.set(0, 0.22, d / 2 + 1.0); g.add(step);
+    for (const sx of [-1, 1]) {
+      const pot = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x8a5a38 }));
+      pot.scale.set(0.85, 0.7, 0.85); pot.position.set(sx * (w * 0.38), 0.35, d / 2 + 0.8); g.add(pot);
+      const bush = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: 0x4f9e4c }));
+      bush.scale.set(0.62, 0.7, 0.62); bush.position.set(sx * (w * 0.38), 0.98, d / 2 + 0.8); g.add(bush);
     }
     return { group: g, radius: 0.5 * Math.hypot(w, d), mass: 26 + floors * 14 };
   }
@@ -563,7 +566,7 @@
     const h = floors * 3.2;
     const base = pick(CITY.stucco);
     const cols = Math.max(3, Math.round(w / 3.2));
-    const tex = facadeTex('stucco', base, pick(CITY.frame), '#33405c');
+    const tex = facadeTex('stucco', base, '#ffffff', '#4a9ede', false);
     tex.repeat.set(cols, floors);
     const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ map: tex }));
     body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
@@ -590,7 +593,7 @@
     const floors = rand(8, 20);
     const h = floors * 3.1;
     const cols = Math.max(3, Math.round(w / 3));
-    const tex = facadeTex('glass', pick(CITY.glass), '#ffffff', '#4b6f85');
+    const tex = facadeTex('glass', pick(CITY.glass), '#ffffff', '#5aa8e8');
     tex.repeat.set(cols, floors);
     const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ map: tex }));
     body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
@@ -625,11 +628,11 @@
   // ===================== 其他物件 =====================
   function buildTree() {
     const g = new THREE.Group();
-    if (Math.random() < 0.45) {
-      // 松树：主干 + 3 层圆锥
+    if (Math.random() < 0.25) {
+      // 松树：主干 + 3 层圆锥（少量点缀）
       const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x6b4326 }));
       trunk.scale.set(0.4, 2.0, 0.4); trunk.position.y = 1.0; g.add(trunk);
-      const pineMat = new THREE.MeshLambertMaterial({ color: pick(['#2f9e58', '#37a862', '#289452']) });
+      const pineMat = new THREE.MeshLambertMaterial({ color: pick(['#3fae7a', '#46b488', '#389a6a']) });
       const tiers = [[2.6, 2.6, 3.4], [2.1, 2.3, 5.4], [1.5, 2.0, 7.2]];
       for (const [r, h, y] of tiers) {
         const cone = new THREE.Mesh(coneGeo, pineMat);
@@ -637,22 +640,20 @@
       }
       return { group: g, radius: 2.4, mass: 12 };
     }
-    // 阔叶树：主干 + 多个相交球团，云朵状
+    // 阔叶树：主干 + 蓬松薄荷蓝绿球团（参考的云朵树）
     const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x7a5230 }));
-    trunk.scale.set(0.5, 2.8, 0.5); trunk.position.y = 1.4; g.add(trunk);
-    const base = pick(['#3a8f4e', '#46a05a', '#3f9648', '#55a860']);
+    trunk.scale.set(0.5, 2.4, 0.5); trunk.position.y = 1.2; g.add(trunk);
+    const base = pick(['#6fcfa8', '#7fd4b4', '#5fc49a', '#8fd8bc']);
     const blobs = [
-      [0, 5.4, 0, 2.6], [1.8, 5.0, 0.6, 1.9], [-1.8, 5.0, -0.4, 1.9],
-      [0.4, 6.6, -0.6, 1.8], [-0.5, 4.6, 1.6, 1.7], [1.2, 6.2, 1.2, 1.4]
+      [0, 5.0, 0, 2.8], [1.9, 4.6, 0.6, 2.0], [-1.9, 4.6, -0.5, 2.0],
+      [0.5, 6.2, -0.7, 1.9], [-0.6, 4.3, 1.6, 1.8], [1.3, 5.8, 1.3, 1.5], [-1.4, 5.8, -1.2, 1.5]
     ];
     for (const [bx, by, bz, br] of blobs) {
-      // 双色球冠：深绿主体随机穿插亮绿高光球，接近参考的明快双色树
-      const shade = Math.random() < 0.45 ? '#5fae66' : base;
+      const shade = Math.random() < 0.4 ? '#9fe0c8' : base;
       const b = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: shade }));
       b.scale.set(br, br * 1.05, br); b.position.set(bx, by, bz); g.add(b);
     }
-    g.scale.setScalar(0.82);   // 参考的树冠整体偏小巧
-    return { group: g, radius: 2.4, mass: 12 };
+    return { group: g, radius: 2.7, mass: 12 };
   }
   function buildStreetLamp() {
     const g = new THREE.Group();
