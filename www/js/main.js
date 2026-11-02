@@ -47,6 +47,68 @@
   let holeGeo, holeWallGeo, grassTex, dashTex, crossTex, holeTex, umbrellaTex, texCache = {};
   let toothMat, windowTextures = [];
 
+  // ===================== 美术资产（生图模型重制，billboard 贴片） =====================
+  // key: [png 路径, 世界高度]
+  const ASSETS = {
+    bld_shop_pink: ['assets/bld_shop_pink.png', 13.0],
+    bld_shop_cream: ['assets/bld_shop_cream.png', 13.0],
+    bld_shop_mint: ['assets/bld_shop_mint.png', 13.0],
+    bld_apt: ['assets/bld_apt.png', 30.0],
+    bld_office: ['assets/bld_office.png', 42.0],
+    tree_cloud: ['assets/tree_cloud.png', 7.2],
+    tree_pine: ['assets/tree_pine.png', 7.6],
+    bush: ['assets/bush.png', 2.0],
+    planter: ['assets/planter.png', 1.7],
+    bin: ['assets/bin.png', 1.8],
+    hydrant: ['assets/hydrant.png', 1.5],
+    lamp: ['assets/lamp.png', 8.5],
+    trafficlight: ['assets/trafficlight.png', 6.0],
+    busstop: ['assets/busstop.png', 5.0],
+    bench: ['assets/bench.png', 1.6],
+    fountain: ['assets/fountain.png', 8.0],
+    car_red: ['assets/car_red.png', 3.4],
+    car_blue: ['assets/car_blue.png', 3.6],
+    ped_yellow: ['assets/ped_yellow.png', 2.4],
+    ped_red: ['assets/ped_red.png', 2.4],
+    ped_white: ['assets/ped_white.png', 2.4]
+  };
+  const texs = {};
+  // 预加载全部贴图，完成后回调
+  function loadAssets(done) {
+    const keys = Object.keys(ASSETS);
+    let n = 0, fired = false;
+    const fin = () => { if (!fired && ++n >= keys.length) { fired = true; done(); } };
+    const loader = new THREE.TextureLoader();
+    const DATA = window.__ASSET_DATA || null;
+    for (const k of keys) {
+      // 优先用内联 base64（WebView 下 file:// 读图会污染 WebGL 纹理），没有则回退到文件
+      const src = (DATA && DATA[k]) || ASSETS[k][0];
+      loader.load(src, (t) => {
+        t.minFilter = THREE.LinearMipmapLinearFilter;
+        t.magFilter = THREE.LinearFilter;
+        t.generateMipmaps = true;
+        t.anisotropy = 4;
+        texs[k] = t; fin();
+      }, undefined, () => fin());
+    }
+    if (!keys.length) done();
+  }
+  // 竖立贴片：底边贴地，高 worldH，宽按图片原始比例（保证不变形）
+  function spriteOf(key, worldH, yOffset) {
+    const t = texs[key];
+    const t0 = t || texs[Object.keys(texs)[0]];
+    const ar = (t0 && t0.image) ? t0.image.width / t0.image.height : 1;
+    const h = worldH || ASSETS[key][1];
+    const w = h * ar;
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: t0, transparent: true, alphaTest: 0.2, depthWrite: true, fog: true
+    }));
+    sp.scale.set(w, h, 1);
+    sp.position.y = h * 0.5 + (yOffset || 0);
+    sp.userData.w = w; sp.userData.h = h;
+    return sp;
+  }
+
   const $ = (id) => document.getElementById(id);
   const rand = (a, b) => a + Math.random() * (b - a);
   const pick = (arr) => arr[(Math.random() * arr.length) | 0];
@@ -146,13 +208,13 @@
     ray.set(camera.position, tmpV);
     for (const pr of preys) {
       if (pr.eaten || !pr.box) continue;
-      const target = ray.intersectBox(pr.box, tmpV2) ? 0.35 : 1;
+      const target = ray.intersectBox(pr.box, tmpV2) ? 0.62 : 1;
       if (pr.fade !== target) {
         pr.fade += (target - pr.fade) * 0.28;
         if (Math.abs(pr.fade - target) < 0.02) pr.fade = target;
         const f = pr.fade;
         pr.group.traverse(o => {
-          if (o.isMesh && o.material && o.renderOrder !== -2) {
+          if ((o.isMesh || o.isSprite) && o.material && o.renderOrder !== -2) {
             o.material.transparent = true;
             o.material.opacity = f;
           }
@@ -196,6 +258,26 @@
     }
     const t = new THREE.CanvasTexture(c);
     t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 6);
+    t.anisotropy = 4;
+    return t;
+  }
+  // 城市硬铺装地坪（浅灰紫 + 细砖缝），代替"满城草地"
+  function makePaveTex() {
+    const s = 256;
+    const c = cv(s, s); const x = c.getContext('2d');
+    x.fillStyle = '#bcb2c6'; x.fillRect(0, 0, s, s);
+    x.strokeStyle = 'rgba(148,138,164,0.30)'; x.lineWidth = 1;
+    for (let i = 0; i <= s; i += 32) {
+      x.beginPath(); x.moveTo(i + 0.5, 0); x.lineTo(i + 0.5, s); x.stroke();
+      x.beginPath(); x.moveTo(0, i + 0.5); x.lineTo(s, i + 0.5); x.stroke();
+    }
+    for (let i = 0; i < 700; i++) {
+      x.fillStyle = 'rgba(255,255,255,' + (Math.random() * 0.045).toFixed(3) + ')';
+      x.beginPath(); x.arc(Math.random() * s, Math.random() * s, Math.random() * 5 + 1, 0, 6.28); x.fill();
+    }
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(120, 120);
     t.anisotropy = 4;
     return t;
   }
@@ -321,8 +403,8 @@
     renderer.setSize(window.innerWidth, window.innerHeight);
 
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x3a94f4);
-    scene.fog = new THREE.Fog(0x3a94f4, 300, 520);
+    scene.background = new THREE.Color(0x74b4ec);
+    scene.fog = new THREE.Fog(0x74b4ec, 200, 400);
 
     camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 2600);
 
@@ -352,7 +434,7 @@
     umbrellaTex = makeUmbrellaTex();
     const ground = new THREE.Mesh(
       new THREE.PlaneGeometry(CFG.world * 6, CFG.world * 6),
-      new THREE.MeshLambertMaterial({ map: grassTex })
+      new THREE.MeshLambertMaterial({ map: makePaveTex() })
     );
     ground.rotation.x = -Math.PI / 2;
     ground.receiveShadow = true;
@@ -384,9 +466,9 @@
 
   // 柏油 + 人行道 + 路缘石 + 车道虚线（马卡龙配色：浅紫路面，参考 hole.io 风格）
   function buildRoadNetwork() {
-    const roadMat = new THREE.MeshLambertMaterial({ color: 0x948aad });
-    const sideMat = new THREE.MeshLambertMaterial({ color: 0xbfb2c2 });
-    const curbMat = new THREE.MeshLambertMaterial({ color: 0xe8e2ec });
+    const roadMat = new THREE.MeshLambertMaterial({ color: 0x8a819e });
+    const sideMat = new THREE.MeshLambertMaterial({ color: 0xb2a7ba });
+    const curbMat = new THREE.MeshLambertMaterial({ color: 0xd5cede });
     const len = CFG.world * 2;
     const addRoad = (axis, pos) => {
       const w = axis === 'x' ? len : ROAD_W;
@@ -498,19 +580,32 @@
     place(plazaMat, rand(32, 58));
   }
 
-  // 边缘远景天际线
+  // 边缘远景：用同款楼房贴片往外铺一圈，靠雾融进天空（比灰盒子自然）
   function buildSkyline() {
-    const mat = new THREE.MeshLambertMaterial({ color: 0x9db5d4 });
-    const ringR = 197;
-    for (let i = 0; i < 70; i++) {
-      const a = i / 70 * Math.PI * 2;
-      const rr = ringR + rand(-12, 12);
-      const w = rand(10, 24), h = rand(36, 140), d = rand(10, 24);
-      const m = new THREE.Mesh(boxGeo, mat);
-      m.scale.set(w, h, d);
-      m.position.set(Math.cos(a) * rr, h / 2, Math.sin(a) * rr);
-      m.rotation.y = rand(0, 6.28);
-      scene.add(m);
+    const keys = ['bld_shop_pink', 'bld_shop_cream', 'bld_shop_mint', 'bld_apt', 'bld_office'];
+    for (let i = 0; i < 96; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const rr = 207 + Math.random() * 55;
+      const h = rand(9, 24);
+      const sp = spriteOf(pick(keys), h);
+      sp.position.x = Math.cos(a) * rr;
+      sp.position.z = Math.sin(a) * rr;
+      scene.add(sp);
+    }
+  }
+
+  // 街区铺装地坪（参考的城市地面是连续硬铺装，草地只留公园/花坛）
+  function buildBlocks(xs, zs) {
+    const mat = new THREE.MeshLambertMaterial({ color: 0xbcb2c6 });
+    for (const [x0, x1] of xs) {
+      for (const [z0, z1] of zs) {
+        const w = x1 - x0, d = z1 - z0;
+        if (w < 14 || d < 14) continue;
+        const p = new THREE.Mesh(new THREE.PlaneGeometry(w + SIDE_W * 2 - 0.6, d + SIDE_W * 2 - 0.6), mat);
+        p.rotation.x = -Math.PI / 2;
+        p.position.set((x0 + x1) / 2, 0.06, (z0 + z1) / 2);
+        scene.add(p);
+      }
     }
   }
 
@@ -518,92 +613,27 @@
   // 欧式联排小楼：红砖/灰泥 + 红瓦坡顶 + 烟囱 + 底层店面
   function buildRowHouse() {
     const g = new THREE.Group();
-    const w = rand(9, 13), d = rand(10, 14);
-    const floors = 2 + (Math.random() < 0.45 ? 1 : 0);
-    const h = floors * 3.2;
-    // 墙体：珊瑚粉/米黄/浅蓝紫（参考临街商铺色）
-    const base = pick(['#e89486', '#e8d6b4', '#b6a6d6', '#d6c2c4', '#a4b6d8']);
-    const cols = Math.max(2, Math.round(w / 3.3));
-    const tex = facadeTex('stucco', base, '#ffffff', '#4a9ede', false);
-    tex.repeat.set(cols, floors);
-    const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ map: tex }));
-    body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
-    // 平顶 + 女儿墙（参考临街楼多为平顶）
-    const roof = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xd8cbb8 }));
-    roof.scale.set(w + 0.7, 0.6, d + 0.7); roof.position.y = h + 0.3; g.add(roof);
-    // 条纹雨篷（白+彩相间，向下斜伸，参考同款波浪边）
-    if (Math.random() < 0.7) {
-      const c1 = pick(['#4a7fd0', '#d05a4a', '#e0a040', '#4a9e6a']);
-      const awning = new THREE.Group();
-      for (let i = 0; i < 6; i++) {
-        const strip = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: i % 2 === 0 ? 0xffffff : c1 }));
-        strip.scale.set(w * 0.16, 0.14, 1.9);
-        strip.position.set(-w * 0.4 + i * w * 0.16, 0, 0);
-        strip.rotation.x = -0.55;
-        awning.add(strip);
-      }
-      awning.position.set(0, 3.05, d / 2 + 0.5);
-      g.add(awning);
-    }
-    // 门 + 门前台阶 + 两侧绿植盆栽（参考门口细节）
-    const door = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x6b4a2e }));
-    door.scale.set(1.4, 2.0, 0.18); door.position.set(0, 1.0, d / 2 + 0.04); g.add(door);
-    const step = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xc2c4d0 }));
-    step.scale.set(2.6, 0.45, 1.0); step.position.set(0, 0.22, d / 2 + 1.0); g.add(step);
-    for (const sx of [-1, 1]) {
-      const pot = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x8a5a38 }));
-      pot.scale.set(0.85, 0.7, 0.85); pot.position.set(sx * (w * 0.38), 0.35, d / 2 + 0.8); g.add(pot);
-      const bush = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: 0x4f9e4c }));
-      bush.scale.set(0.62, 0.7, 0.62); bush.position.set(sx * (w * 0.38), 0.98, d / 2 + 0.8); g.add(bush);
-    }
-    return { group: g, radius: 0.5 * Math.hypot(w, d), mass: 26 + floors * 14 };
+    const key = pick(['bld_shop_pink', 'bld_shop_cream', 'bld_shop_mint', 'bld_shop_cream']);
+    const h = rand(11.5, 14.5);
+    const sp = spriteOf(key, h);
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.42, mass: 46 + h * 2.2, boxH: h };
   }
   // 高层公寓：灰泥板楼 + 平屋顶女儿墙 + 屋顶水箱空调机
   function buildAptTower() {
     const g = new THREE.Group();
-    const w = rand(12, 17), d = rand(12, 17);
-    const floors = rand(5, 9);
-    const h = floors * 3.2;
-    const base = pick(CITY.stucco);
-    const cols = Math.max(3, Math.round(w / 3.2));
-    const tex = facadeTex('stucco', base, '#ffffff', '#4a9ede', false);
-    tex.repeat.set(cols, floors);
-    const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ map: tex }));
-    body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
-    // 屋顶平台
-    const deck = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x9a9a96 }));
-    deck.scale.set(w + 0.8, 1.0, d + 0.8); deck.position.y = h + 0.5; g.add(deck);
-    // 水箱
-    if (Math.random() < 0.7) {
-      const tank = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x8a7a63 }));
-      tank.scale.set(1.5, 2.2, 1.5); tank.position.set(rand(-w * 0.2, w * 0.2), h + 2.1, rand(-d * 0.2, d * 0.2)); g.add(tank);
-    }
-    // 空调外机
-    const acs = 1 + (Math.random() < 0.6 ? 1 : 0);
-    for (let i = 0; i < acs; i++) {
-      const ac = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0xb0b4b8 }));
-      ac.scale.set(1.4, 0.9, 1.2); ac.position.set(rand(-w * 0.3, w * 0.3), h + 1.45, rand(-d * 0.3, d * 0.3)); g.add(ac);
-    }
-    return { group: g, radius: 0.5 * Math.hypot(w, d), mass: 90 + floors * 16 };
+    const h = rand(26, 36);
+    const sp = spriteOf('bld_apt', h);
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.40, mass: 110 + h * 3, boxH: h };
   }
   // 玻璃幕墙塔楼
   function buildGlassTower() {
     const g = new THREE.Group();
-    const w = rand(13, 19), d = rand(13, 19);
-    const floors = rand(8, 20);
-    const h = floors * 3.1;
-    const cols = Math.max(3, Math.round(w / 3));
-    const tex = facadeTex('glass', pick(CITY.glass), '#ffffff', '#5aa8e8');
-    tex.repeat.set(cols, floors);
-    const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ map: tex }));
-    body.scale.set(w, h, d); body.position.y = h / 2; g.add(body);
-    const deck = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x8d949b }));
-    deck.scale.set(w + 0.8, 0.9, d + 0.8); deck.position.y = h + 0.45; g.add(deck);
-    const mech = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x5d646c }));
-    mech.scale.set(w * 0.5, 3, d * 0.5); mech.position.y = h + 2.4; g.add(mech);
-    const ant = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x444a50 }));
-    ant.scale.set(0.22, 6, 0.22); ant.position.y = h + 6.9; g.add(ant);
-    return { group: g, radius: 0.5 * Math.hypot(w, d), mass: 130 + floors * 9 };
+    const h = rand(38, 52);
+    const sp = spriteOf('bld_office', h);
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.38, mass: 180 + h * 3, boxH: h };
   }
   // 厂房仓库：锯齿屋顶 + 烟囱
   function buildWarehouse() {
@@ -628,204 +658,70 @@
   // ===================== 其他物件 =====================
   function buildTree() {
     const g = new THREE.Group();
-    if (Math.random() < 0.25) {
-      // 松树：主干 + 3 层圆锥（少量点缀）
-      const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x6b4326 }));
-      trunk.scale.set(0.4, 2.0, 0.4); trunk.position.y = 1.0; g.add(trunk);
-      const pineMat = new THREE.MeshLambertMaterial({ color: pick(['#3fae7a', '#46b488', '#389a6a']) });
-      const tiers = [[2.6, 2.6, 3.4], [2.1, 2.3, 5.4], [1.5, 2.0, 7.2]];
-      for (const [r, h, y] of tiers) {
-        const cone = new THREE.Mesh(coneGeo, pineMat);
-        cone.scale.set(r, h, r); cone.position.y = y; g.add(cone);
-      }
-      return { group: g, radius: 2.4, mass: 12 };
-    }
-    // 阔叶树：主干 + 蓬松薄荷蓝绿球团（参考的云朵树）
-    const trunk = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x7a5230 }));
-    trunk.scale.set(0.5, 2.4, 0.5); trunk.position.y = 1.2; g.add(trunk);
-    const base = pick(['#6fcfa8', '#7fd4b4', '#5fc49a', '#8fd8bc']);
-    const blobs = [
-      [0, 5.0, 0, 2.8], [1.9, 4.6, 0.6, 2.0], [-1.9, 4.6, -0.5, 2.0],
-      [0.5, 6.2, -0.7, 1.9], [-0.6, 4.3, 1.6, 1.8], [1.3, 5.8, 1.3, 1.5], [-1.4, 5.8, -1.2, 1.5]
-    ];
-    for (const [bx, by, bz, br] of blobs) {
-      const shade = Math.random() < 0.4 ? '#9fe0c8' : base;
-      const b = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: shade }));
-      b.scale.set(br, br * 1.05, br); b.position.set(bx, by, bz); g.add(b);
-    }
-    return { group: g, radius: 2.7, mass: 12 };
+    const pine = Math.random() < 0.28;
+    const h = pine ? rand(6.2, 8.4) : rand(6.4, 8.2);
+    const sp = spriteOf(pine ? 'tree_pine' : 'tree_cloud', h);
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.40, mass: 12 };
   }
   function buildStreetLamp() {
     const g = new THREE.Group();
-    const pole = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x3a3f45 }));
-    pole.scale.set(0.18, 5.2, 0.18); pole.position.y = 2.6; g.add(pole);
-    const arm = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x3a3f45 }));
-    arm.scale.set(0.18, 0.18, 1.5); arm.position.set(0, 5.2, 0.65); g.add(arm);
-    const bulb = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0xfff0b8 }));
-    bulb.scale.setScalar(0.32); bulb.position.set(0, 5.05, 1.3); g.add(bulb);
-    return { group: g, radius: 0.8, mass: 3 };
+    g.add(spriteOf('lamp', rand(7.6, 9.0)));
+    return { group: g, radius: 0.7, mass: 3 };
   }
   function buildTrafficLight() {
     const g = new THREE.Group();
-    const pole = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x3f444a }));
-    pole.scale.set(0.16, 4.2, 0.16); pole.position.y = 2.1; g.add(pole);
-    const head = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x24282c }));
-    head.scale.set(0.8, 1.9, 0.5); head.position.y = 4.6; g.add(head);
-    [0xff3b30, 0xffcc00, 0x34c759].forEach((c, i) => {
-      const b = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: c }));
-      b.scale.setScalar(0.19); b.position.set(0, 5.0 - i * 0.6, 0.27); g.add(b);
-    });
+    g.add(spriteOf('trafficlight', rand(5.4, 6.4)));
     return { group: g, radius: 0.6, mass: 2 };
   }
   function buildBusStop() {
     const g = new THREE.Group();
-    const pole = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x3f444a }));
-    pole.scale.set(0.14, 2.8, 0.14); pole.position.y = 1.4; g.add(pole);
-    const sign = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x2f6fb5 }));
-    sign.scale.set(0.9, 0.9, 0.12); sign.position.set(0, 3.0, 0); g.add(sign);
-    const roof = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x9aa2aa }));
-    roof.scale.set(4.2, 0.18, 1.8); roof.position.set(0, 2.6, 0.6); g.add(roof);
-    const glass = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x9ec3de, transparent: true, opacity: 0.45 }));
-    glass.scale.set(4.0, 2.2, 0.1); glass.position.set(0, 1.4, 1.45); g.add(glass);
-    const bench = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x8a5a2b }));
-    bench.scale.set(3.2, 0.16, 0.55); bench.position.set(0, 0.7, 0.6); g.add(bench);
-    return { group: g, radius: 2.2, mass: 8 };
+    const sp = spriteOf('busstop', 5.0);
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.42, mass: 8 };
   }
   function buildTrashBin() {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x4c5359 }));
-    body.scale.set(0.55, 1.1, 0.55); body.position.y = 0.55; g.add(body);
-    const lid = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x2f3438 }));
-    lid.scale.set(0.62, 0.14, 0.62); lid.position.y = 1.15; g.add(lid);
+    g.add(spriteOf('bin', rand(1.6, 1.9)));
     return { group: g, radius: 0.6, mass: 2 };
   }
   function buildBush() {
     const g = new THREE.Group();
-    const m = new THREE.MeshLambertMaterial({ color: pick([0x4e9b4a, 0x5aa851, 0x43893f]) });
-    for (const o of [[-0.4, 0.5, 0], [0.4, 0.5, 0], [0, 0.78, 0.2]]) {
-      const b = new THREE.Mesh(sphereGeo, m);
-      b.scale.setScalar(pick([0.6, 0.85, 0.7])); b.position.set(o[0], o[1], o[2]); g.add(b);
-    }
-    return { group: g, radius: 0.9, mass: 4 };
+    const sp = spriteOf('bush', rand(1.6, 2.2));
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.42, mass: 4 };
   }
   function buildFlower() {
     const g = new THREE.Group();
-    const stem = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x4e9b4a }));
-    stem.scale.set(0.07, 0.7, 0.07); stem.position.y = 0.35; g.add(stem);
-    const top = new THREE.Mesh(sphereGeo, new THREE.MeshLambertMaterial({ color: pick(['#e8617d', '#f0b83c', '#d982c6', '#f5f5f0', '#9b6bff']) }));
-    top.scale.setScalar(0.2); top.position.y = 0.75; g.add(top);
-    return { group: g, radius: 0.4, mass: 0.5 };
+    g.add(spriteOf('planter', rand(1.4, 1.8)));
+    return { group: g, radius: 0.5, mass: 1 };
   }
   function buildBench() {
     const g = new THREE.Group();
-    const wmat = new THREE.MeshLambertMaterial({ color: 0x8a5a2b });
-    const seat = new THREE.Mesh(boxGeo, wmat); seat.scale.set(2, 0.15, 0.6); seat.position.y = 0.5; g.add(seat);
-    const back = new THREE.Mesh(boxGeo, wmat); back.scale.set(2, 0.5, 0.15); back.position.set(0, 0.8, -0.25); g.add(back);
-    for (const sx of [-0.9, 0.9]) for (const sz of [-0.25, 0.25]) {
-      const leg = new THREE.Mesh(boxGeo, wmat); leg.scale.set(0.15, 0.5, 0.15); leg.position.set(sx, 0.25, sz); g.add(leg);
-    }
-    return { group: g, radius: 1.2, mass: 6 };
+    const sp = spriteOf('bench', 1.6);
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.42, mass: 6 };
   }
   function buildHydrant() {
     const g = new THREE.Group();
-    const m = new THREE.MeshLambertMaterial({ color: 0xcf4436 });
-    const body = new THREE.Mesh(cylGeo, m); body.scale.set(0.32, 0.95, 0.32); body.position.y = 0.48; g.add(body);
-    const cap = new THREE.Mesh(sphereGeo, m); cap.scale.setScalar(0.34); cap.position.y = 0.96; g.add(cap);
+    g.add(spriteOf('hydrant', 1.5));
     return { group: g, radius: 0.5, mass: 3 };
   }
 
   // 车辆：轿车 / 厢式货车 / 巴士，带车窗、轮毂、尾灯
   function buildCar(kind) {
     const g = new THREE.Group();
-    const palette = ['#c94f43', '#3f6fb5', '#4f9a63', '#e0b040', '#c96ba8', '#e07b3a', '#e8e8e4', '#3c4147'];
-    const color = pick(palette);
-    const cmat = new THREE.MeshLambertMaterial({ color });
-    const glassMat = new THREE.MeshLambertMaterial({ color: 0x223445 });
-    const wmat = new THREE.MeshLambertMaterial({ color: 0x17191c });
-    const hubMat = new THREE.MeshLambertMaterial({ color: 0xb8bcc0 });
-    const tailMat = new THREE.MeshBasicMaterial({ color: 0xb81f1f });
-    const headMat = new THREE.MeshBasicMaterial({ color: 0xfff2b0 });
-    const wheels = [];
-    const addWheels = (w, d) => {
-      for (const p of [[-w, 0.52, d], [w, 0.52, d], [-w, 0.52, -d], [w, 0.52, -d]]) {
-        const wh = new THREE.Mesh(cylGeo, wmat);
-        wh.scale.set(0.54, 0.34, 0.54); wh.rotation.z = Math.PI / 2;
-        wh.position.set(p[0], p[1], p[2]); g.add(wh);
-        const hub = new THREE.Mesh(cylGeo, hubMat);
-        hub.scale.set(0.26, 0.36, 0.26); hub.rotation.z = Math.PI / 2;
-        hub.position.set(p[0] + (p[0] > 0 ? 0.02 : -0.02), p[1], p[2]); g.add(hub);
-        wheels.push(wh);
-      }
-    };
-    if (kind === 'van') {
-      const body = new THREE.Mesh(boxGeo, cmat); body.scale.set(2.4, 2.4, 5.6); body.position.y = 1.8; g.add(body);
-      const cab = new THREE.Mesh(boxGeo, cmat); cab.scale.set(2.3, 1.7, 1.6); cab.position.set(0, 1.45, 2.2); g.add(cab);
-      const wind = new THREE.Mesh(boxGeo, glassMat); wind.scale.set(2.0, 1.1, 0.12); wind.position.set(0, 1.7, 3.0); g.add(wind);
-      const side = new THREE.Mesh(boxGeo, glassMat); side.scale.set(0.12, 1.2, 4.0); side.position.set(1.22, 1.9, 0); g.add(side);
-      const side2 = side.clone(); side2.position.x = -1.22; g.add(side2);
-      addWheels(1.15, 1.9);
-      for (const tx of [-1.0, 1.0]) { const tl = new THREE.Mesh(boxGeo, tailMat); tl.scale.set(0.3, 0.3, 0.12); tl.position.set(tx, 1.4, -2.84); g.add(tl); }
-      return { group: g, radius: 3.0, mass: 12, parts: { wheels } };
-    }
-    if (kind === 'bus') {
-      const body = new THREE.Mesh(boxGeo, cmat); body.scale.set(2.7, 3.2, 9.5); body.position.y = 2.2; g.add(body);
-      const glass = new THREE.Mesh(boxGeo, glassMat); glass.scale.set(2.78, 1.2, 8.6); glass.position.y = 3.3; g.add(glass);
-      const skirt = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: 0x8a9099 }));
-      skirt.scale.set(2.8, 0.5, 9.6); skirt.position.y = 0.9; g.add(skirt);
-      const door = new THREE.Mesh(boxGeo, glassMat); door.scale.set(0.16, 2.6, 1.4); door.position.set(1.37, 2.0, 3.6); g.add(door);
-      addWheels(1.3, 3.2);
-      for (const tx of [-1.0, 1.0]) { const tl = new THREE.Mesh(boxGeo, tailMat); tl.scale.set(0.34, 0.34, 0.12); tl.position.set(tx, 1.6, -4.78); g.add(tl); }
-      return { group: g, radius: 5.0, mass: 26, parts: { wheels } };
-    }
-    // 轿车：下半身 + 引擎盖 + 车厢 + 车窗
-    const body = new THREE.Mesh(boxGeo, cmat); body.scale.set(2.3, 1.0, 4.6); body.position.y = 0.95; g.add(body);
-    const hood = new THREE.Mesh(boxGeo, cmat); hood.scale.set(2.25, 0.7, 1.3); hood.position.set(0, 1.35, 1.75); g.add(hood);
-    const trunk = new THREE.Mesh(boxGeo, cmat); trunk.scale.set(2.2, 0.7, 1.1); trunk.position.set(0, 1.35, -1.85); g.add(trunk);
-    const cabin = new THREE.Mesh(boxGeo, cmat); cabin.scale.set(2.1, 1.0, 2.2); cabin.position.set(0, 1.7, -0.2); g.add(cabin);
-    const wind = new THREE.Mesh(boxGeo, glassMat); wind.scale.set(1.95, 0.85, 0.12); wind.position.set(0, 1.75, 0.95); g.add(wind);
-    const rear = new THREE.Mesh(boxGeo, glassMat); rear.scale.set(1.95, 0.8, 0.12); rear.position.set(0, 1.75, -1.35); g.add(rear);
-    const sw = new THREE.Mesh(boxGeo, glassMat); sw.scale.set(0.12, 0.8, 2.0); sw.position.set(1.07, 1.75, -0.2); g.add(sw);
-    const sw2 = sw.clone(); sw2.position.x = -1.07; g.add(sw2);
-    for (const tx of [-0.85, 0.85]) {
-      const hl = new THREE.Mesh(boxGeo, headMat); hl.scale.set(0.45, 0.28, 0.12); hl.position.set(tx, 1.0, 2.32); g.add(hl);
-      const tl = new THREE.Mesh(boxGeo, tailMat); tl.scale.set(0.45, 0.28, 0.12); tl.position.set(tx, 1.05, -2.32); g.add(tl);
-    }
-    addWheels(1.05, 1.55);
-    return { group: g, radius: 2.6, mass: 8, parts: { wheels } };
+    const truck = kind === 'van' || kind === 'bus' || Math.random() < 0.28;
+    const sp = spriteOf(truck ? 'car_blue' : 'car_red', truck ? rand(3.5, 4.1) : rand(3.1, 3.7));
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.5, mass: truck ? 14 : 8 };
   }
 
   // 行人：分高矮、可戴帽子，四肢用 pivot 便于摆动
   function buildPerson() {
     const g = new THREE.Group();
-    const skin = pick([0xffcc99, 0xf1c27d, 0xe0ac69, 0xc68642, 0x8d5524]);
-    const cloth = pick(['#e05a5a', '#4d7fd6', '#5cb87a', '#f2c53d', '#a97ee0', '#ef8f3a', '#3fbdb0', '#d94f8f', '#4a5a70']);
-    const lg = 0.9, h = rand(0.9, 1.3);
-    const body = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: cloth }));
-    body.scale.set(0.8, h, 0.5); body.position.y = lg + h / 2; g.add(body);
-    const head = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: skin }));
-    head.scale.set(0.6, 0.6, 0.6); head.position.y = lg + h + 0.3; g.add(head);
-    // 黑发（大多数）或帽子（少数），参考里行人多为黑发
-    if (Math.random() < 0.6) {
-      const hair = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick(['#222222', '#3d2b1f', '#151515']) }));
-      hair.scale.set(0.64, 0.2, 0.64); hair.position.y = lg + h + 0.52; g.add(hair);
-    } else if (Math.random() < 0.4) {
-      const hat = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: pick(['#2a2a2a', '#8b5a2b', '#c0392b', '#2e86de']) }));
-      hat.scale.set(0.66, 0.22, 0.66); hat.position.y = lg + h + 0.6; g.add(hat);
-    }
-    const mkLimb = (w, len, x, jointY, col) => {
-      const pivot = new THREE.Group();
-      pivot.position.set(x, jointY, 0);
-      const m = new THREE.Mesh(boxGeo, new THREE.MeshLambertMaterial({ color: col }));
-      m.scale.set(w, len, w); m.position.y = -len / 2; pivot.add(m); g.add(pivot);
-      return pivot;
-    };
-    const parts = {
-      armL: mkLimb(0.2, 0.8, -0.5, lg + h * 0.9, cloth),
-      armR: mkLimb(0.2, 0.8, 0.5, lg + h * 0.9, cloth),
-      legL: mkLimb(0.22, lg, -0.22, lg, 0x33333d),
-      legR: mkLimb(0.22, lg, 0.22, lg, 0x33333d)
-    };
-    return { group: g, radius: 0.7, mass: 1.2, parts };
+    g.add(spriteOf(pick(['ped_yellow', 'ped_red', 'ped_white']), rand(2.1, 2.6)));
+    return { group: g, radius: 0.55, mass: 1.2 };
   }
 
   // ===================== 城市布置 =====================
@@ -835,12 +731,19 @@
     scene.add(res.group);
     // blob 投影（柔和接触阴影，移动端稳定显示，不依赖 shadow map）
     const blob = new THREE.Mesh(
-      new THREE.CircleGeometry(Math.max(res.radius * 1.25, 0.8), 24),
-      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.25, depthWrite: false })
+      new THREE.CircleGeometry(Math.max(res.radius * 1.08, 0.7), 24),
+      new THREE.MeshBasicMaterial({ color: 0x2c2340, transparent: true, opacity: 0.13, depthWrite: false })
     );
     blob.rotation.x = -Math.PI / 2; blob.position.y = 0.18; blob.renderOrder = -2; res.group.add(blob);
     let box = null;
-    if (kind === 'row' || kind === 'tower') {
+    if (res.boxH) {
+      // 贴片物体：用"半宽 x 高度"的柱体近似遮挡体积（Sprite 包围盒厚度为 0，无法命中射线）
+      const hw = res.radius * 0.9, hd = res.radius * 0.6;
+      box = new THREE.Box3(
+        new THREE.Vector3(x - hw, 0, z - hd),
+        new THREE.Vector3(x + hw, res.boxH, z + hd)
+      );
+    } else if (kind === 'row' || kind === 'tower') {
       try { box = new THREE.Box3().setFromObject(res.group); } catch (e) { box = null; }
     }
     preys.push({ group: res.group, radius: res.radius, mass: res.mass, eaten: false, eater: null, kind, box, fade: 1 });
@@ -859,6 +762,7 @@
     placed.length = 0;
     placeFountains();
     const xs = axisIntervals(ROAD_X), zs = axisIntervals(ROAD_Z);
+    buildBlocks(xs, zs);
     for (const [x0, x1] of xs) {
       for (const [z0, z1] of zs) {
         const bw = x1 - x0, bd = z1 - z0;
@@ -919,20 +823,9 @@
   // 喷泉地标：水池 + 中心柱 + 双层水盘 + 水柱（参考画面中央广场的喷泉）
   function buildFountain() {
     const g = new THREE.Group();
-    const stone = new THREE.MeshLambertMaterial({ color: 0xefe9f6 });
-    const pool = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x6fc9ee }));
-    pool.scale.set(5, 0.7, 5); pool.position.y = 0.35; g.add(pool);
-    const rim = new THREE.Mesh(cylGeo, stone);
-    rim.scale.set(5.5, 1.0, 5.5); rim.position.y = 0.5; g.add(rim);
-    const col = new THREE.Mesh(cylGeo, stone);
-    col.scale.set(0.9, 2.2, 0.9); col.position.y = 1.7; g.add(col);
-    const bowl = new THREE.Mesh(cylGeo, new THREE.MeshLambertMaterial({ color: 0x9fdcf5 }));
-    bowl.scale.set(2.3, 0.5, 2.3); bowl.position.y = 2.95; g.add(bowl);
-    const jet = new THREE.Mesh(cylGeo, new THREE.MeshBasicMaterial({ color: 0xd6f1ff, transparent: true, opacity: 0.75 }));
-    jet.scale.set(0.42, 3.2, 0.42); jet.position.y = 4.6; g.add(jet);
-    const top = new THREE.Mesh(sphereGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
-    top.scale.setScalar(0.55); top.position.y = 6.3; g.add(top);
-    return { group: g, radius: 5.5, mass: 70 };
+    const sp = spriteOf('fountain', 8.0);
+    g.add(sp);
+    return { group: g, radius: sp.userData.w * 0.45, mass: 70 };
   }
   // 在开阔草地上放 3 座喷泉（避开道路/海洋/出生区/已有物体）
   function placeFountains() {
@@ -1390,8 +1283,8 @@
     camera.lookAt(p.x, 0, p.z);
     // 雾随相机高度外推：小洞保持原雾；大洞高空时把雾推到地平线，避免全城被糊
     if (scene.fog) {
-      scene.fog.near = Math.max(300, D * 1.02);
-      scene.fog.far = Math.max(520, D * 1.75);
+      scene.fog.near = Math.max(150, D * 0.55);
+      scene.fog.far = Math.max(330, D * 1.15);
     }
   }
   function loop() {
@@ -1501,19 +1394,26 @@
     updateHUD();
   }
   function init() {
-    initWorld();
-    buildDynamicUI();
-    setupInput();
-    $('playBtn').addEventListener('click', () => {
-      if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
-      startGame();
-    });
-    $('againBtn').addEventListener('click', startGame);
-    $('muteBtn').addEventListener('click', () => {
-      muted = !muted;
-      $('muteBtn').textContent = muted ? '🔇 音效：关' : '🔊 音效：开';
-    });
-    loop();
+    const boot = () => {
+      initWorld();
+      buildDynamicUI();
+      setupInput();
+      $('playBtn').addEventListener('click', () => {
+        if (!audioCtx) { try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) {} }
+        startGame();
+      });
+      $('againBtn').addEventListener('click', startGame);
+      $('muteBtn').addEventListener('click', () => {
+        muted = !muted;
+        $('muteBtn').textContent = muted ? '🔇 音效：关' : '🔊 音效：开';
+      });
+      loop();
+    };
+    // 资产贴图加载完成后再启动（3.5s 超时兜底，缺图也不至于卡死）
+    let fired = false;
+    const go = () => { if (fired) return; fired = true; boot(); };
+    try { loadAssets(go); } catch (e) { go(); }
+    setTimeout(go, 3500);
   }
   window.addEventListener('load', init);
 })();

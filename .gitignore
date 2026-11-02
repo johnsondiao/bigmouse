@@ -15,3 +15,6 @@ gradle-*.zip
 .DS_Store
 *.iml
 .idea/
+
+# 美术源图（已内联进 www/js/assets.js，不重复提交）
+assets_src/

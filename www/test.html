@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>大嘴巴-test</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="game">
+  <canvas id="c"></canvas>
+
+  <div id="hud" class="hidden">
+    <div class="hud-item">⏱ <span id="time">2:00</span></div>
+    <div class="hud-item">🍬 <span id="score">0</span></div>
+    <div class="hud-item">🏆 <span id="rank">1</span></div>
+  </div>
+
+  <div id="start" class="screen">
+    <div class="panel">
+      <h1>大嘴巴</h1>
+      <p class="sub">拖动屏幕，操控大嘴巴吞掉整座城市！</p>
+      <ul class="tips">
+        <li>👆 手指拖动 = 移动大嘴巴</li>
+        <li>🏠 吞掉人物/车辆/树木/楼房就会变大</li>
+        <li>😼 比别的嘴巴大，就能把它吃掉</li>
+        <li>⏱ 两分钟内看谁最大</li>
+      </ul>
+      <button id="playBtn" class="btn">开始游戏</button>
+      <button id="muteBtn" class="btn ghost">🔊 音效：开</button>
+    </div>
+  </div>
+
+  <div id="over" class="screen hidden">
+    <div class="panel">
+      <h1 id="overTitle">时间到！</h1>
+      <p class="sub" id="overDesc"></p>
+      <div class="stats">
+        <div><b id="finalScore">0</b>吞掉数量</div>
+        <div><b id="finalRank">1</b>最终排名</div>
+        <div><b id="finalSize">0</b>嘴巴大小</div>
+      </div>
+      <button id="againBtn" class="btn">再玩一次</button>
+    </div>
+  </div>
+</div>
+<script src="js/three.min.js"></script>
+<script src="js/assets.js"></script>
+<script src="js/main.js"></script>
+<script>
+window.addEventListener('load', function(){
+  // 资产贴图异步加载后才绑定按钮，这里轮询直到进入游戏
+  var tries = 0;
+  var t = setInterval(function(){
+    var b = document.getElementById('playBtn');
+    var s = document.getElementById('start');
+    if (s && s.classList.contains('hidden')) { clearInterval(t); return; }
+    if (b) b.click();
+    if (++tries > 80) clearInterval(t);
+  }, 250);
+});
+</script>
+</body>
+</html>

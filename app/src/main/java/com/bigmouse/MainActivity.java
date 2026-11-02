@@ -19,6 +19,8 @@ public class MainActivity extends Activity {
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         ws.setAllowFileAccess(true);
+        ws.setAllowFileAccessFromFileURLs(true);
+        ws.setAllowUniversalAccessFromFileURLs(true);
         ws.setCacheMode(WebSettings.LOAD_NO_CACHE);
 
         webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
